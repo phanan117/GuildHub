@@ -2,6 +2,7 @@ using GuildHub.Core.Data;
 using GuildHub.Web.Auth;
 using GuildHub.Web.Components;
 using GuildHub.Web.Configuration;
+using GuildHub.Web.Endpoints;
 using GuildHub.Web.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
@@ -70,6 +71,8 @@ try
     builder.Services.AddScoped<DiscordSyncService>();
     builder.Services.AddScoped<DashboardService>();
     builder.Services.AddScoped<MemberManagementService>();
+    builder.Services.AddScoped<ScheduleService>();
+    builder.Services.AddScoped<AnalyticsService>();
 
     builder.Services.Configure<ForwardedHeadersOptions>(options =>
     {
@@ -116,6 +119,7 @@ try
     app.UseAntiforgery();
 
     app.MapDiscordAuthEndpoints();
+    app.MapAnalyticsExportEndpoints();
 
     app.MapRazorComponents<App>()
         .AddInteractiveServerRenderMode();

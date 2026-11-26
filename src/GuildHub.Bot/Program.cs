@@ -62,6 +62,7 @@ try
     builder.Services.AddHostedService<DiscordBotHostedService>();
     builder.Services.AddHostedService<EventAutoCloseHostedService>();
     builder.Services.AddHostedService<PeriodicMemberSyncHostedService>();
+    builder.Services.AddHostedService<ScheduledFormHostedService>();
 
     var host = builder.Build();
     await host.RunAsync();

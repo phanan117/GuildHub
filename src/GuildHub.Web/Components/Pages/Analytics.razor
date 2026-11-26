@@ -1,17 +1,1090 @@
 @page "/analytics"
 @attribute [Authorize]
+@implements IDisposable
+@using System.Globalization
+@using GuildHub.Core.Domain.Enums
+@inject GuildSessionState Session
+@inject AnalyticsService AnalyticsService
 
 <PageTitle>Phân tích bang hội — GuildHub</PageTitle>
 
-<div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-10 text-center max-w-2xl mx-auto">
-    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-brand-50 text-brand-700 border border-brand-200 mb-4">
-        Giai đoạn 2
-    </span>
-    <h2 class="text-xl font-extrabold text-slate-900">Phân tích bang hội & Bảng chuyên cần</h2>
-    <p class="text-sm text-slate-500 mt-2 leading-relaxed">
-        Phân hệ này bao gồm thống kê 30/90 ngày/tất cả, biểu đồ cột đăng ký theo tuần, so sánh Bang chiến vs Scrim, Top 10 thành viên tích cực nhất và bảng chuyên cần chi tiết.
-    </p>
-    <a href="/" class="mt-6 inline-flex items-center px-5 py-2.5 rounded-xl bg-slatebtn hover:bg-slatebtn-hover text-white text-sm font-semibold transition">
-        ← Quay về Tổng quan
-    </a>
-</div>
+@if (Session.CurrentGuildId == 0)
+{
+    <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-10 text-center">
+        <p class="text-sm text-slate-500">Chưa có server Discord nào được chọn.</p>
+    </div>
+}
+else
+{
+    <div class="w-full space-y-5">
+        <!-- Thanh tiêu đề & Bộ lọc kỳ thống kê -->
+        <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <div class="text-xs font-medium text-slate-500">Báo cáo hiệu suất & chuyên cần</div>
+                <h2 class="text-lg font-extrabold text-slate-900 mt-0.5 flex items-center gap-2">
+                    <span>Phân tích bang hội</span>
+                    @if (_loading)
+                    {
+                        <span class="w-4 h-4 border-2 border-brand-600 border-t-transparent rounded-full animate-spin"></span>
+                    }
+                </h2>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2.5">
+                <SearchSelect Options="@RangeOptions"
+                              Value="@_rangeValue"
+                              ValueChanged="HandleRangeChangedAsync"
+                              ShowSearch="false"
+                              Compact="true"
+                              WrapperClass="w-44" />
+
+                <SearchSelect Options="@EventTypeFilterOptions"
+                              Value="@_eventTypeValue"
+                              ValueChanged="HandleEventTypeChangedAsync"
+                              ShowSearch="false"
+                              Compact="true"
+                              WrapperClass="w-44" />
+
+                <button type="button"
+                        @onclick="LoadAnalyticsAsync"
+                        disabled="@_loading"
+                        title="Tải lại số liệu"
+                        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer disabled:opacity-50">
+                    <svg class="w-3.5 h-3.5 @(_loading ? "animate-spin" : "")" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M20 20v-5h-5M5.64 18.36A9 9 0 0019.07 14M18.36 5.64A9 9 0 004.93 10" />
+                    </svg>
+                    <span>Làm mới</span>
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl px-4 py-3 text-sm font-medium">
+                ⚠️ @_errorMessage
+            </div>
+        }
+        else if (_data is null)
+        {
+            <div class="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500 shadow-card">
+                <span class="inline-block w-6 h-6 border-2 border-brand-600 border-t-transparent rounded-full animate-spin align-middle mr-2"></span>
+                Đang tổng hợp dữ liệu phân tích...
+            </div>
+        }
+        else
+        {
+            <!-- 4 thẻ KPI tổng quan -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-slate-500">Tổng số buổi chiến</span>
+                        <span class="w-8 h-8 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <rect x="3" y="4" width="18" height="17" rx="2" />
+                                <path stroke-linecap="round" d="M8 2v4M16 2v4M3 10h18" />
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">@_data.TotalEvents</div>
+                    <div class="text-xs text-slate-500 mt-1.5">
+                        Bang chiến: <strong class="text-rose-600">@_data.GuildWarComparison.EventCount</strong> ·
+                        Giao hữu: <strong class="text-sky-600">@_data.ScrimComparison.EventCount</strong>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-slate-500">Tỷ lệ điểm danh TB</span>
+                        <span class="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">
+                        @_data.AverageAttendanceRatePercent.ToString("0.#", CultureInfo.InvariantCulture)%
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1.5">
+                        Trung bình <strong class="text-slate-700">@_data.AverageParticipantsPerEvent.ToString("0.#", CultureInfo.InvariantCulture)</strong> người đi / buổi
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-slate-500">Tổng lượt đăng ký Đi</span>
+                        <span class="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4 19h16M7 16V9m5 7V5m5 11v-4" />
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">@_data.TotalAttendedSignups</div>
+                    <div class="text-xs text-slate-500 mt-1.5">
+                        Dự bị: <strong class="text-sky-600">@_data.TotalBenchSignups</strong> ·
+                        Bận/Vắng: <strong class="text-rose-600">@_data.TotalBusySignups</strong>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-slate-500">Thành viên tích cực</span>
+                        <span class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M17 20v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
+                                <circle cx="9.5" cy="7" r="3.5" />
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">
+                        @_data.ActiveParticipantsCount
+                        @if (_data.ActiveGuildMemberCount > 0)
+                        {
+                            <span class="text-base font-bold text-slate-400">/ @_data.ActiveGuildMemberCount</span>
+                        }
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1.5">Có tham gia ít nhất 1 buổi trong kỳ</div>
+                </div>
+            </div>
+
+            <!-- Hàng 2: Biểu đồ cột theo tuần (8 cột) + So sánh Bang chiến vs Giao hữu (4 cột) -->
+            <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+                <!-- Biểu đồ cột quân số theo tuần -->
+                <div class="xl:col-span-8 bg-white rounded-2xl border border-slate-200/90 shadow-card p-6 flex flex-col">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+                        <div>
+                            <div class="text-xs font-medium text-slate-500">Xu hướng điểm danh</div>
+                            <h3 class="text-lg font-extrabold text-slate-900 mt-0.5">Quân số tham gia theo tuần</h3>
+                        </div>
+
+                        <div class="inline-flex items-center rounded-xl bg-slate-100 p-0.5 text-xs font-bold">
+                            <button type="button"
+                                    @onclick="() => _weeklyMetricMode = WeeklyMetricAverage"
+                                    class="px-3 py-1.5 rounded-lg transition cursor-pointer @(_weeklyMetricMode == WeeklyMetricAverage ? "bg-white text-brand-700 shadow-xs" : "text-slate-500 hover:text-slate-800")">
+                                TB / buổi
+                            </button>
+                            <button type="button"
+                                    @onclick="() => _weeklyMetricMode = WeeklyMetricTotal"
+                                    class="px-3 py-1.5 rounded-lg transition cursor-pointer @(_weeklyMetricMode == WeeklyMetricTotal ? "bg-white text-brand-700 shadow-xs" : "text-slate-500 hover:text-slate-800")">
+                                Tổng lượt đi
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (_data.WeeklyTrend.Count == 0)
+                    {
+                        <div class="flex-1 min-h-[220px] flex items-center justify-center text-sm text-slate-400 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
+                            Chưa có sự kiện nào trong khoảng thời gian đã chọn.
+                        </div>
+                    }
+                    else
+                    {
+                        var maxVal = _data.WeeklyTrend.Max(w => _weeklyMetricMode == WeeklyMetricAverage ? w.AverageAttended : w.TotalAttended);
+                        var chartMax = Math.Max(1.0, Math.Ceiling(maxVal / 5.0) * 5.0);
+
+                        <div class="flex-1 flex flex-col justify-end">
+                            <div class="relative h-56 pt-6 pb-1 px-2">
+                                <!-- Các đường kẻ lưới ngang -->
+                                <div class="absolute inset-x-0 top-6 bottom-1 flex flex-col justify-between pointer-events-none">
+                                    @for (var step = 4; step >= 0; step--)
+                                    {
+                                        var tick = Math.Round(chartMax * step / 4.0, 0);
+                                        <div class="flex items-center gap-2 w-full">
+                                            <span class="w-8 text-right text-[10px] font-semibold text-slate-400 tabular-nums">@tick</span>
+                                            <div class="flex-1 border-t border-dashed border-slate-200/90"></div>
+                                        </div>
+                                    }
+                                </div>
+
+                                <!-- Các cột tuần -->
+                                <div class="relative z-10 h-full pl-10 flex items-end justify-around gap-2 sm:gap-3">
+                                    @foreach (var wk in _data.WeeklyTrend)
+                                    {
+                                        var val = _weeklyMetricMode == WeeklyMetricAverage ? wk.AverageAttended : wk.TotalAttended;
+                                        var pct = Math.Clamp((val / chartMax) * 100.0, 3.0, 100.0);
+                                        var heightStyle = $"height: {pct.ToString("0.##", CultureInfo.InvariantCulture)}%;";
+                                        var valText = _weeklyMetricMode == WeeklyMetricAverage
+                                            ? wk.AverageAttended.ToString("0.#", CultureInfo.InvariantCulture)
+                                            : wk.TotalAttended.ToString();
+
+                                        <div class="group relative flex-1 max-w-[54px] h-full flex flex-col items-center justify-end">
+                                            <!-- Tooltip hover -->
+                                            <div class="opacity-0 group-hover:opacity-100 pointer-events-none transition absolute -top-2 -translate-y-full z-20 bg-slate-900 text-white text-[11px] rounded-xl px-3 py-2 shadow-lg whitespace-nowrap">
+                                                <div class="font-extrabold text-indigo-300">Tuần @wk.WeekRangeLabel</div>
+                                                <div class="mt-0.5">Số buổi: <strong>@wk.EventCount</strong></div>
+                                                <div>TB / buổi: <strong>@wk.AverageAttended.ToString("0.#", CultureInfo.InvariantCulture)</strong> người</div>
+                                                <div>Tổng đi: <strong>@wk.TotalAttended</strong> · Dự bị: @wk.TotalBench</div>
+                                            </div>
+
+                                            <span class="text-[11px] font-extrabold text-slate-700 mb-1 tabular-nums">@valText</span>
+                                            <div class="w-full rounded-t-xl bg-gradient-to-t from-brand-600 to-indigo-400 group-hover:from-brand-700 group-hover:to-indigo-500 transition-all shadow-xs"
+                                                 style="@heightStyle">
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+
+                            <!-- Nhãn trục X -->
+                            <div class="pl-12 pr-2 mt-2 flex items-start justify-around gap-2 sm:gap-3 border-t border-slate-100 pt-2">
+                                @foreach (var wk in _data.WeeklyTrend)
+                                {
+                                    <div class="flex-1 max-w-[54px] text-center">
+                                        <div class="text-[11px] font-bold text-slate-700 tabular-nums">@wk.WeekLabel</div>
+                                        <div class="text-[10px] font-medium text-slate-400">@wk.EventCount buổi</div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <!-- So sánh Bang chiến vs Giao hữu (Scrim) -->
+                <div class="xl:col-span-4 bg-white rounded-2xl border border-slate-200/90 shadow-card p-6 flex flex-col justify-between gap-4">
+                    <div>
+                        <div class="text-xs font-medium text-slate-500">Hiệu suất theo chế độ</div>
+                        <h3 class="text-lg font-extrabold text-slate-900 mt-0.5">Bang chiến vs Giao hữu</h3>
+                    </div>
+
+                    @{
+                        var compMax = Math.Max(1.0, Math.Max(_data.GuildWarComparison.AverageAttended, _data.ScrimComparison.AverageAttended));
+                        var gwBarPct = Math.Clamp((_data.GuildWarComparison.AverageAttended / compMax) * 100.0, 0, 100);
+                        var scBarPct = Math.Clamp((_data.ScrimComparison.AverageAttended / compMax) * 100.0, 0, 100);
+                    }
+
+                    <div class="space-y-4 flex-1 flex flex-col justify-center">
+                        <!-- Khối Bang chiến -->
+                        <div class="rounded-2xl border border-rose-200/80 bg-rose-50/45 p-4 space-y-2.5">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="inline-flex items-center gap-2 text-sm font-extrabold text-rose-900">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-rose-600"></span>
+                                    Bang chiến
+                                </span>
+                                <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-white text-rose-700 border border-rose-200/80">
+                                    @_data.GuildWarComparison.EventCount buổi
+                                </span>
+                            </div>
+
+                            <div class="flex items-baseline justify-between">
+                                <div class="text-2xl font-extrabold text-slate-900 tabular-nums">
+                                    @_data.GuildWarComparison.AverageAttended.ToString("0.#", CultureInfo.InvariantCulture)
+                                    <span class="text-xs font-semibold text-slate-500">người / buổi</span>
+                                </div>
+                                <span class="text-xs font-bold text-rose-700">Đỉnh: @_data.GuildWarComparison.PeakAttended</span>
+                            </div>
+
+                            <div class="w-full h-2.5 bg-white/90 rounded-full overflow-hidden border border-rose-100">
+                                <div class="h-full rounded-full bg-rose-500 transition-all"
+                                     style="width: @gwBarPct.ToString("0.#", CultureInfo.InvariantCulture)%"></div>
+                            </div>
+
+                            <div class="flex items-center justify-between text-[11px] text-slate-600">
+                                <span>Tổng lượt đi: <strong>@_data.GuildWarComparison.TotalAttended</strong></span>
+                                <span>TB Dự bị: <strong>@_data.GuildWarComparison.AverageBench.ToString("0.#", CultureInfo.InvariantCulture)</strong> · Bận: <strong>@_data.GuildWarComparison.AverageBusy.ToString("0.#", CultureInfo.InvariantCulture)</strong></span>
+                            </div>
+                        </div>
+
+                        <!-- Khối Giao hữu (Scrim) -->
+                        <div class="rounded-2xl border border-sky-200/80 bg-sky-50/45 p-4 space-y-2.5">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="inline-flex items-center gap-2 text-sm font-extrabold text-sky-900">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-sky-600"></span>
+                                    Giao hữu (Scrim)
+                                </span>
+                                <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-white text-sky-700 border border-sky-200/80">
+                                    @_data.ScrimComparison.EventCount buổi
+                                </span>
+                            </div>
+
+                            <div class="flex items-baseline justify-between">
+                                <div class="text-2xl font-extrabold text-slate-900 tabular-nums">
+                                    @_data.ScrimComparison.AverageAttended.ToString("0.#", CultureInfo.InvariantCulture)
+                                    <span class="text-xs font-semibold text-slate-500">người / buổi</span>
+                                </div>
+                                <span class="text-xs font-bold text-sky-700">Đỉnh: @_data.ScrimComparison.PeakAttended</span>
+                            </div>
+
+                            <div class="w-full h-2.5 bg-white/90 rounded-full overflow-hidden border border-sky-100">
+                                <div class="h-full rounded-full bg-sky-500 transition-all"
+                                     style="width: @scBarPct.ToString("0.#", CultureInfo.InvariantCulture)%"></div>
+                            </div>
+
+                            <div class="flex items-center justify-between text-[11px] text-slate-600">
+                                <span>Tổng lượt đi: <strong>@_data.ScrimComparison.TotalAttended</strong></span>
+                                <span>TB Dự bị: <strong>@_data.ScrimComparison.AverageBench.ToString("0.#", CultureInfo.InvariantCulture)</strong> · Bận: <strong>@_data.ScrimComparison.AverageBusy.ToString("0.#", CultureInfo.InvariantCulture)</strong></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hàng 3: Top 10 thành viên tích cực (7 cột) + Phân bố hệ phái thực chiến (5 cột) -->
+            <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+                <!-- Top 10 thành viên tích cực nhất -->
+                <div class="xl:col-span-7 bg-white rounded-2xl border border-slate-200/90 shadow-card p-6">
+                    <div class="flex items-center justify-between gap-3 mb-4">
+                        <div>
+                            <div class="text-xs font-medium text-slate-500">Bảng vinh danh</div>
+                            <h3 class="text-lg font-extrabold text-slate-900 mt-0.5">Top 10 thành viên tích cực nhất</h3>
+                        </div>
+                        <span class="text-xs font-semibold text-slate-400">Tính theo số buổi Đi</span>
+                    </div>
+
+                    @if (_data.TopActiveMembers.Count == 0)
+                    {
+                        <div class="py-12 text-center text-sm text-slate-400 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
+                            Chưa có lượt tham gia nào trong kỳ thống kê.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="divide-y divide-slate-100">
+                            @for (var i = 0; i < _data.TopActiveMembers.Count; i++)
+                            {
+                                var m = _data.TopActiveMembers[i];
+                                var rank = i + 1;
+
+                                <div class="py-2.5 flex items-center justify-between gap-3 hover:bg-sky-50/40 rounded-xl px-2 transition">
+                                    <div class="flex items-center gap-3 min-w-0 flex-1">
+                                        <span class="w-7 h-7 rounded-xl text-xs font-extrabold inline-flex items-center justify-center flex-shrink-0 @GetRankBadgeClasses(rank)">
+                                            @rank
+                                        </span>
+
+                                        @if (!string.IsNullOrWhiteSpace(m.AvatarUrl))
+                                        {
+                                            <img src="@m.AvatarUrl" alt="" class="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 flex-shrink-0" />
+                                        }
+                                        else
+                                        {
+                                            <div class="w-8 h-8 rounded-full bg-brand-50 text-brand-700 font-bold text-xs flex items-center justify-center flex-shrink-0">
+                                                @(m.PrimaryName.Length > 0 ? char.ToUpperInvariant(m.PrimaryName[0]) : '?')
+                                            </div>
+                                        }
+
+                                        <div class="min-w-0 flex-1">
+                                            <div class="flex items-center gap-2 min-w-0">
+                                                <span class="text-sm font-bold text-slate-800 truncate">@m.PrimaryName</span>
+                                                @if (!string.IsNullOrWhiteSpace(m.ClassDisplayName))
+                                                {
+                                                    var hex = m.ClassHexColor ?? "#6366F1";
+                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold border flex-shrink-0"
+                                                          style="background:@($"{hex}14"); border-color:@($"{hex}44"); color:@hex">
+                                                        @if (!string.IsNullOrWhiteSpace(m.ClassIconFileName))
+                                                        {
+                                                            <img src="/icons/@m.ClassIconFileName" alt="" class="w-3.5 h-3.5 object-contain" />
+                                                        }
+                                                        <span>@m.ClassDisplayName</span>
+                                                    </span>
+                                                }
+                                            </div>
+                                            @if (!string.IsNullOrWhiteSpace(m.IngameNickname) && !string.Equals(m.IngameNickname, m.DisplayName, StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                <div class="text-[11px] text-slate-400 truncate">@m.DisplayName</div>
+                                            }
+                                        </div>
+                                    </div>
+
+                                    <div class="flex items-center gap-3 flex-shrink-0">
+                                        <div class="text-right">
+                                            <div class="text-xs font-extrabold text-slate-900 tabular-nums">
+                                                @m.AttendedCount <span class="text-slate-400 font-semibold">/ @m.TotalEvents buổi</span>
+                                            </div>
+                                            <div class="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1">
+                                                <div class="h-full rounded-full @GetRateBarColor(m.AttendanceRatePercent)"
+                                                     style="width: @m.AttendanceRatePercent.ToString("0.#", CultureInfo.InvariantCulture)%"></div>
+                                            </div>
+                                        </div>
+
+                                        <span class="w-14 text-center px-2 py-1 rounded-lg text-xs font-extrabold tabular-nums @GetRateBadgeClasses(m.AttendanceRatePercent)">
+                                            @m.AttendanceRatePercent.ToString("0.#", CultureInfo.InvariantCulture)%
+                                        </span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <!-- Phân bố hệ phái thực chiến (tái sử dụng DonutChart.razor) -->
+                <div class="xl:col-span-5 bg-white rounded-2xl border border-slate-200/90 shadow-card p-6 flex flex-col">
+                    <div class="mb-4">
+                        <div class="text-xs font-medium text-slate-500">Đội hình thực chiến</div>
+                        <h3 class="text-lg font-extrabold text-slate-900 mt-0.5">Phân bố hệ phái tham gia</h3>
+                    </div>
+
+                    @{
+                        var totalCombatRoles = _data.TankCombatTotal + _data.DpsCombatTotal + _data.HealerCombatTotal;
+                        var tankPct = totalCombatRoles > 0 ? Math.Round(_data.TankCombatTotal * 100.0 / totalCombatRoles, 1) : 0;
+                        var dpsPct = totalCombatRoles > 0 ? Math.Round(_data.DpsCombatTotal * 100.0 / totalCombatRoles, 1) : 0;
+                        var healPct = totalCombatRoles > 0 ? Math.Round(_data.HealerCombatTotal * 100.0 / totalCombatRoles, 1) : 0;
+                    }
+
+                    @if (_data.CombatClassStats.Count == 0)
+                    {
+                        <div class="flex-1 py-12 flex items-center justify-center text-sm text-slate-400 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
+                            Chưa có dữ liệu môn phái thực chiến.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="flex flex-col items-center">
+                            <DonutChart Segments="@CombatClassSegments"
+                                        CenterValue="@totalCombatRoles.ToString()"
+                                        CenterLabel="lượt thực chiến"
+                                        Size="152"
+                                        StrokeWidth="16" />
+
+                            <!-- Tỷ lệ 3 vai trò -->
+                            <div class="grid grid-cols-3 gap-2 w-full mt-4">
+                                <div class="rounded-xl bg-amber-50/80 border border-amber-200/70 px-2.5 py-2 text-center">
+                                    <div class="text-[11px] font-bold text-amber-700">Tank</div>
+                                    <div class="text-sm font-extrabold text-slate-900 tabular-nums">@tankPct.ToString("0.#", CultureInfo.InvariantCulture)%</div>
+                                </div>
+                                <div class="rounded-xl bg-rose-50/80 border border-rose-200/70 px-2.5 py-2 text-center">
+                                    <div class="text-[11px] font-bold text-rose-700">DPS</div>
+                                    <div class="text-sm font-extrabold text-slate-900 tabular-nums">@dpsPct.ToString("0.#", CultureInfo.InvariantCulture)%</div>
+                                </div>
+                                <div class="rounded-xl bg-pink-50/80 border border-pink-200/70 px-2.5 py-2 text-center">
+                                    <div class="text-[11px] font-bold text-pink-700">Healer</div>
+                                    <div class="text-sm font-extrabold text-slate-900 tabular-nums">@healPct.ToString("0.#", CultureInfo.InvariantCulture)%</div>
+                                </div>
+                            </div>
+
+                            <!-- Chi tiết từng hệ phái -->
+                            <div class="w-full mt-4 space-y-2 text-xs">
+                                @foreach (var item in _data.CombatClassStats)
+                                {
+                                    <div class="flex items-center justify-between gap-2 px-1">
+                                        <div class="flex items-center gap-2 min-w-0">
+                                            <img src="/icons/@item.IconFileName" alt="@item.DisplayName" class="w-4 h-4 object-contain flex-shrink-0" />
+                                            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:@item.HexColor"></span>
+                                            <span class="font-semibold text-slate-700 truncate">@item.DisplayName</span>
+                                        </div>
+
+                                        <div class="flex items-center gap-2.5 flex-shrink-0 tabular-nums">
+                                            <span class="text-slate-400">TB @item.AveragePerEvent.ToString("0.#", CultureInfo.InvariantCulture)/buổi</span>
+                                            <strong class="text-slate-800 w-10 text-right">@item.SharePercent.ToString("0.#", CultureInfo.InvariantCulture)%</strong>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Hàng 4: Bảng chuyên cần chi tiết từng thành viên (KHÔNG đặt overflow-hidden trên card) -->
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card">
+                <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <div class="text-xs font-medium text-slate-500">Theo dõi từng thành viên</div>
+                        <h3 class="text-lg font-extrabold text-slate-900 mt-0.5 flex items-center gap-2">
+                            <span>Bảng chuyên cần chi tiết</span>
+                            <span class="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                                @_filteredRows.Count thành viên
+                            </span>
+                        </h3>
+                    </div>
+
+                    <a href="@BuildExportExcelUrl()"
+                       class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-sm transition whitespace-nowrap">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                        </svg>
+                        <span>Xuất Excel (.xlsx)</span>
+                    </a>
+                </div>
+
+                <!-- Thanh bộ lọc bảng -->
+                <div class="px-6 py-3.5 border-b border-slate-100 bg-slate-50/50 flex flex-wrap items-center gap-2.5">
+                    <div class="relative flex-1 min-w-[200px]">
+                        <input type="text"
+                               value="@_searchQuery"
+                               @oninput="HandleSearchInput"
+                               placeholder="Tìm tên, nickname, môn phái..."
+                               class="w-full bg-white border border-slate-200 rounded-xl pl-3.5 pr-8 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
+                        @if (!string.IsNullOrEmpty(_searchQuery))
+                        {
+                            <button type="button"
+                                    @onclick="ClearSearch"
+                                    class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs font-bold cursor-pointer">
+                                ✕
+                            </button>
+                        }
+                    </div>
+
+                    <SearchSelect Options="@ClassFilterOptions"
+                                  Value="@_classFilterValue"
+                                  ValueChanged="HandleClassFilterChanged"
+                                  Placeholder="Tất cả môn phái"
+                                  SearchPlaceholder="Tìm môn phái..."
+                                  AllowClear="true"
+                                  Compact="true"
+                                  WrapperClass="w-44" />
+
+                    <SearchSelect Options="@TierFilterOptions"
+                                  Value="@_tierFilterValue"
+                                  ValueChanged="HandleTierFilterChanged"
+                                  ShowSearch="false"
+                                  Compact="true"
+                                  WrapperClass="w-44" />
+
+                    <SearchSelect Options="@PageSizeOptions"
+                                  Value="@_pageSizeStr"
+                                  ValueChanged="HandlePageSizeChanged"
+                                  ShowSearch="false"
+                                  Compact="true"
+                                  AlignRight="true"
+                                  WrapperClass="w-28" />
+                </div>
+
+                <!-- Bảng dữ liệu -->
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse min-w-[880px]">
+                        <thead>
+                            <tr class="bg-slate-50/80 border-b border-slate-200 text-xs font-bold text-slate-600 select-none">
+                                <th class="py-3.5 px-6">
+                                    <button type="button" @onclick='() => ToggleSort("name")' class="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer">
+                                        <span>Thành viên</span>
+                                        <span class="text-[10px]">@SortIndicator("name")</span>
+                                    </button>
+                                </th>
+                                <th class="py-3.5 px-4">
+                                    <button type="button" @onclick='() => ToggleSort("class")' class="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer">
+                                        <span>Môn phái</span>
+                                        <span class="text-[10px]">@SortIndicator("class")</span>
+                                    </button>
+                                </th>
+                                <th class="py-3.5 px-3 text-center">
+                                    <button type="button" @onclick='() => ToggleSort("attended")' class="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer">
+                                        <span>Đi</span>
+                                        <span class="text-[10px]">@SortIndicator("attended")</span>
+                                    </button>
+                                </th>
+                                <th class="py-3.5 px-3 text-center">
+                                    <button type="button" @onclick='() => ToggleSort("bench")' class="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer">
+                                        <span>Dự bị</span>
+                                        <span class="text-[10px]">@SortIndicator("bench")</span>
+                                    </button>
+                                </th>
+                                <th class="py-3.5 px-3 text-center">
+                                    <button type="button" @onclick='() => ToggleSort("busy")' class="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer">
+                                        <span>Bận</span>
+                                        <span class="text-[10px]">@SortIndicator("busy")</span>
+                                    </button>
+                                </th>
+                                <th class="py-3.5 px-3 text-center">
+                                    <button type="button" @onclick='() => ToggleSort("noresponse")' class="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer">
+                                        <span>Không ĐK</span>
+                                        <span class="text-[10px]">@SortIndicator("noresponse")</span>
+                                    </button>
+                                </th>
+                                <th class="py-3.5 px-4 w-52">
+                                    <button type="button" @onclick='() => ToggleSort("rate")' class="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer">
+                                        <span>Chuyên cần</span>
+                                        <span class="text-[10px]">@SortIndicator("rate")</span>
+                                    </button>
+                                </th>
+                                <th class="py-3.5 px-6 text-right">
+                                    <button type="button" @onclick='() => ToggleSort("last")' class="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer">
+                                        <span>Tham gia gần nhất</span>
+                                        <span class="text-[10px]">@SortIndicator("last")</span>
+                                    </button>
+                                </th>
+                            </tr>
+                        </thead>
+
+                        <tbody class="divide-y divide-slate-100 text-sm">
+                            @if (_pagedRows.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="8" class="py-12 text-center text-sm text-slate-400">
+                                        Không tìm thấy thành viên nào phù hợp với bộ lọc hiện tại.
+                                    </td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var row in _pagedRows)
+                                {
+                                    <tr class="hover:bg-sky-50/40 transition">
+                                        <td class="py-3 px-6">
+                                            <div class="flex items-center gap-3 min-w-0">
+                                                @if (!string.IsNullOrWhiteSpace(row.AvatarUrl))
+                                                {
+                                                    <img src="@row.AvatarUrl" alt="" class="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 flex-shrink-0" />
+                                                }
+                                                else
+                                                {
+                                                    <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold text-xs flex items-center justify-center flex-shrink-0">
+                                                        @(row.PrimaryName.Length > 0 ? char.ToUpperInvariant(row.PrimaryName[0]) : '?')
+                                                    </div>
+                                                }
+
+                                                <div class="min-w-0">
+                                                    <div class="flex items-center gap-1.5">
+                                                        <span class="font-bold text-slate-800 truncate">@row.PrimaryName</span>
+                                                        @if (!row.IsActiveGuildMember)
+                                                        {
+                                                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500">Ngoài ds bang</span>
+                                                        }
+                                                    </div>
+                                                    @if (!string.IsNullOrWhiteSpace(row.IngameNickname) && !string.Equals(row.IngameNickname, row.DisplayName, StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        <div class="text-xs text-slate-400 truncate">@row.DisplayName</div>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </td>
+
+                                        <td class="py-3 px-4">
+                                            @if (!string.IsNullOrWhiteSpace(row.ClassDisplayName))
+                                            {
+                                                var hex = row.ClassHexColor ?? "#6366F1";
+                                                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border whitespace-nowrap"
+                                                      style="background:@($"{hex}14"); border-color:@($"{hex}44"); color:@hex">
+                                                    @if (!string.IsNullOrWhiteSpace(row.ClassIconFileName))
+                                                    {
+                                                        <img src="/icons/@row.ClassIconFileName" alt="" class="w-3.5 h-3.5 object-contain" />
+                                                    }
+                                                    <span>@row.ClassDisplayName</span>
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-xs text-slate-400">Chưa link</span>
+                                            }
+                                        </td>
+
+                                        <td class="py-3 px-3 text-center tabular-nums">
+                                            <span class="font-extrabold @(row.AttendedCount > 0 ? "text-emerald-700" : "text-slate-400")">
+                                                @row.AttendedCount
+                                            </span>
+                                            @if (row.LateCount > 0)
+                                            {
+                                                <span class="block text-[10px] font-semibold text-amber-600">(@row.LateCount trễ)</span>
+                                            }
+                                        </td>
+
+                                        <td class="py-3 px-3 text-center tabular-nums">
+                                            <span class="font-bold @(row.BenchCount > 0 ? "text-sky-700" : "text-slate-400")">@row.BenchCount</span>
+                                        </td>
+
+                                        <td class="py-3 px-3 text-center tabular-nums">
+                                            <span class="font-bold @(row.BusyCount > 0 ? "text-rose-600" : "text-slate-400")">@row.BusyCount</span>
+                                        </td>
+
+                                        <td class="py-3 px-3 text-center tabular-nums">
+                                            <span class="font-semibold @(row.NoResponseCount > 0 ? "text-slate-600" : "text-slate-300")">@row.NoResponseCount</span>
+                                        </td>
+
+                                        <td class="py-3 px-4">
+                                            <div class="flex items-center gap-2.5">
+                                                <div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                    <div class="h-full rounded-full transition-all @GetRateBarColor(row.AttendanceRatePercent)"
+                                                         style="width: @row.AttendanceRatePercent.ToString("0.#", CultureInfo.InvariantCulture)%"></div>
+                                                </div>
+                                                <span class="w-12 text-right text-xs font-extrabold tabular-nums @GetRateTextColor(row.AttendanceRatePercent)">
+                                                    @row.AttendanceRatePercent.ToString("0.#", CultureInfo.InvariantCulture)%
+                                                </span>
+                                            </div>
+                                        </td>
+
+                                        <td class="py-3 px-6 text-right text-xs tabular-nums whitespace-nowrap">
+                                            @if (row.LastAttendedUtc.HasValue)
+                                            {
+                                                var vnTime = row.LastAttendedUtc.Value.ToOffset(VietnamOffset);
+                                                <span class="font-semibold text-slate-700">@vnTime.ToString("dd/MM/yyyy")</span>
+                                                <span class="text-slate-400 ml-1">@vnTime.ToString("HH:mm")</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-slate-400">Chưa tham gia</span>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Phân trang -->
+                @if (_filteredRows.Count > 0)
+                {
+                    var fromIdx = (_currentPage - 1) * _pageSize + 1;
+                    var toIdx = Math.Min(_currentPage * _pageSize, _filteredRows.Count);
+
+                    <div class="px-6 py-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+                        <div>
+                            Hiển thị <strong class="text-slate-800">@fromIdx–@toIdx</strong> / <strong class="text-slate-800">@_filteredRows.Count</strong> thành viên
+                        </div>
+
+                        <div class="flex items-center gap-1.5">
+                            <button type="button"
+                                    @onclick="() => GoToPage(_currentPage - 1)"
+                                    disabled="@(_currentPage <= 1)"
+                                    class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold text-slate-700 transition cursor-pointer">
+                                ‹ Trước
+                            </button>
+
+                            <span class="px-3 py-1.5 font-bold text-slate-700">
+                                Trang @_currentPage / @TotalPages
+                            </span>
+
+                            <button type="button"
+                                    @onclick="() => GoToPage(_currentPage + 1)"
+                                    disabled="@(_currentPage >= TotalPages)"
+                                    class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 font-semibold text-slate-700 transition cursor-pointer">
+                                Sau ›
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
+    private const string WeeklyMetricAverage = "avg";
+    private const string WeeklyMetricTotal = "total";
+
+    private AnalyticsDashboardResult? _data;
+    private bool _loading;
+    private string? _errorMessage;
+
+    private string? _rangeValue = "30";
+    private string? _eventTypeValue = "";
+    private string _weeklyMetricMode = WeeklyMetricAverage;
+
+    // Bộ lọc, sắp xếp và phân trang bảng chuyên cần
+    private string _searchQuery = string.Empty;
+    private string? _classFilterValue = string.Empty;
+    private string? _tierFilterValue = string.Empty;
+    private string _sortBy = "rate";
+    private bool _sortDesc = true;
+    private int _currentPage = 1;
+    private int _pageSize = 25;
+    private string? _pageSizeStr = "25";
+
+    private List<MemberAttendanceRow> _filteredRows = [];
+    private List<MemberAttendanceRow> _pagedRows = [];
+
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(_filteredRows.Count / (double)_pageSize));
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> RangeOptions =
+    [
+        new("30", "30 ngày gần nhất"),
+        new("90", "90 ngày gần nhất"),
+        new("0", "Toàn thời gian")
+    ];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> EventTypeFilterOptions =
+    [
+        new("", "Tất cả hoạt động"),
+        new(((int)EventType.GuildWar).ToString(), "Bang chiến", ColorDot: "#e11d48"),
+        new(((int)EventType.Scrim).ToString(), "Giao hữu", ColorDot: "#0284c7"),
+        new(((int)EventType.Other).ToString(), "Hoạt động khác", ColorDot: "#d97706")
+    ];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> TierFilterOptions =
+    [
+        new("", "Tất cả mức chuyên cần"),
+        new("high", "Tốt (≥ 75%)", ColorDot: "#10b981"),
+        new("mid", "Trung bình (40–74%)", ColorDot: "#f59e0b"),
+        new("low", "Thấp (< 40%)", ColorDot: "#e11d48")
+    ];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> PageSizeOptions =
+    [
+        new("10", "10 dòng"),
+        new("25", "25 dòng"),
+        new("50", "50 dòng"),
+        new("100", "100 dòng")
+    ];
+
+    private IReadOnlyList<SearchSelect.SelectOption> ClassFilterOptions =>
+        _data?.ClassConfigs.Select(c => new SearchSelect.SelectOption(
+            Value: ((int)c.GameClass).ToString(),
+            Label: c.DisplayName,
+            IconUrl: $"/icons/{c.IconFileName}",
+            ColorDot: c.HexColor)).ToList() ?? [];
+
+    private IReadOnlyList<DonutChart.DonutSegment> CombatClassSegments =>
+        _data?.CombatClassStats.Select(c => new DonutChart.DonutSegment(
+            Label: c.DisplayName,
+            Value: c.TotalSignups,
+            Color: c.HexColor)).ToList() ?? [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.StateChanged += HandleSessionChanged;
+        await LoadAnalyticsAsync();
+    }
+
+    private void HandleSessionChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            _classFilterValue = string.Empty;
+            _currentPage = 1;
+            await LoadAnalyticsAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadAnalyticsAsync()
+    {
+        if (Session.CurrentGuildId == 0)
+        {
+            return;
+        }
+
+        _loading = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var range = _rangeValue switch
+            {
+                "90" => AnalyticsRange.Last90Days,
+                "0" => AnalyticsRange.AllTime,
+                _ => AnalyticsRange.Last30Days
+            };
+
+            EventType? eventType = int.TryParse(_eventTypeValue, out var etInt) ? (EventType)etInt : null;
+
+            _data = await AnalyticsService.GetAnalyticsAsync(Session.CurrentGuildId, range, eventType);
+            ApplyTableFilterAndSort(resetPage: true);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Không thể tải dữ liệu phân tích: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleRangeChangedAsync(string? value)
+    {
+        _rangeValue = string.IsNullOrWhiteSpace(value) ? "30" : value;
+        await LoadAnalyticsAsync();
+    }
+
+    private async Task HandleEventTypeChangedAsync(string? value)
+    {
+        _eventTypeValue = value ?? string.Empty;
+        await LoadAnalyticsAsync();
+    }
+
+    private void HandleSearchInput(ChangeEventArgs e)
+    {
+        _searchQuery = e.Value?.ToString() ?? string.Empty;
+        ApplyTableFilterAndSort(resetPage: true);
+    }
+
+    private void ClearSearch()
+    {
+        _searchQuery = string.Empty;
+        ApplyTableFilterAndSort(resetPage: true);
+    }
+
+    private void HandleClassFilterChanged(string? value)
+    {
+        _classFilterValue = value ?? string.Empty;
+        ApplyTableFilterAndSort(resetPage: true);
+    }
+
+    private void HandleTierFilterChanged(string? value)
+    {
+        _tierFilterValue = value ?? string.Empty;
+        ApplyTableFilterAndSort(resetPage: true);
+    }
+
+    private void HandlePageSizeChanged(string? value)
+    {
+        _pageSizeStr = string.IsNullOrWhiteSpace(value) ? "25" : value;
+        if (int.TryParse(_pageSizeStr, out var size))
+        {
+            _pageSize = Math.Clamp(size, 10, 100);
+        }
+        ApplyTableFilterAndSort(resetPage: true);
+    }
+
+    private void ToggleSort(string column)
+    {
+        if (string.Equals(_sortBy, column, StringComparison.OrdinalIgnoreCase))
+        {
+            _sortDesc = !_sortDesc;
+        }
+        else
+        {
+            _sortBy = column;
+            _sortDesc = column is not ("name" or "class");
+        }
+
+        ApplyTableFilterAndSort(resetPage: false);
+    }
+
+    private void GoToPage(int page)
+    {
+        _currentPage = Math.Clamp(page, 1, TotalPages);
+        UpdatePagedSlice();
+    }
+
+    private void ApplyTableFilterAndSort(bool resetPage)
+    {
+        if (_data is null)
+        {
+            _filteredRows = [];
+            _pagedRows = [];
+            return;
+        }
+
+        IEnumerable<MemberAttendanceRow> q = _data.AttendanceRows;
+
+        // KHÔNG dùng Enum.IsDefined vì hỗ trợ hệ phái tùy chỉnh (id 9, 10, ...)
+        if (int.TryParse(_classFilterValue, out var gcInt) && gcInt > 0)
+        {
+            var gc = (GameClass)gcInt;
+            q = q.Where(r => r.GameClass == gc);
+        }
+
+        q = _tierFilterValue switch
+        {
+            "high" => q.Where(r => r.AttendanceRatePercent >= 75),
+            "mid" => q.Where(r => r.AttendanceRatePercent >= 40 && r.AttendanceRatePercent < 75),
+            "low" => q.Where(r => r.AttendanceRatePercent < 40),
+            _ => q
+        };
+
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            var term = _searchQuery.Trim();
+            q = q.Where(r =>
+                r.PrimaryName.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || r.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || (!string.IsNullOrWhiteSpace(r.ClassDisplayName) && r.ClassDisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        q = (_sortBy, _sortDesc) switch
+        {
+            ("name", false) => q.OrderBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("name", true) => q.OrderByDescending(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("class", false) => q.OrderBy(r => r.ClassDisplayName ?? "zzz", StringComparer.OrdinalIgnoreCase).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("class", true) => q.OrderByDescending(r => r.ClassDisplayName ?? string.Empty, StringComparer.OrdinalIgnoreCase).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("attended", false) => q.OrderBy(r => r.AttendedCount).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("attended", true) => q.OrderByDescending(r => r.AttendedCount).ThenByDescending(r => r.BenchCount).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("bench", false) => q.OrderBy(r => r.BenchCount).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("bench", true) => q.OrderByDescending(r => r.BenchCount).ThenByDescending(r => r.AttendedCount),
+            ("busy", false) => q.OrderBy(r => r.BusyCount).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("busy", true) => q.OrderByDescending(r => r.BusyCount).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("noresponse", false) => q.OrderBy(r => r.NoResponseCount).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("noresponse", true) => q.OrderByDescending(r => r.NoResponseCount).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            ("last", false) => q.OrderBy(r => r.LastAttendedUtc ?? DateTimeOffset.MinValue),
+            ("last", true) => q.OrderByDescending(r => r.LastAttendedUtc ?? DateTimeOffset.MinValue),
+            ("rate", false) => q.OrderBy(r => r.AttendanceRatePercent).ThenBy(r => r.AttendedCount).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase),
+            _ => q.OrderByDescending(r => r.AttendanceRatePercent).ThenByDescending(r => r.AttendedCount).ThenByDescending(r => r.BenchCount).ThenBy(r => r.PrimaryName, StringComparer.OrdinalIgnoreCase)
+        };
+
+        _filteredRows = q.ToList();
+        if (resetPage)
+        {
+            _currentPage = 1;
+        }
+        else
+        {
+            _currentPage = Math.Clamp(_currentPage, 1, TotalPages);
+        }
+
+        UpdatePagedSlice();
+    }
+
+    private void UpdatePagedSlice()
+    {
+        _pagedRows = _filteredRows
+            .Skip((_currentPage - 1) * _pageSize)
+            .Take(_pageSize)
+            .ToList();
+    }
+
+    private string BuildExportExcelUrl()
+    {
+        var qs = new List<string>
+        {
+            $"guildId={Session.CurrentGuildId}",
+            $"range={Uri.EscapeDataString(_rangeValue ?? "30")}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(_eventTypeValue))
+        {
+            qs.Add($"eventType={Uri.EscapeDataString(_eventTypeValue)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_classFilterValue))
+        {
+            qs.Add($"gameClass={Uri.EscapeDataString(_classFilterValue)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_tierFilterValue))
+        {
+            qs.Add($"tier={Uri.EscapeDataString(_tierFilterValue)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            qs.Add($"search={Uri.EscapeDataString(_searchQuery.Trim())}");
+        }
+
+        return "/api/analytics/export-excel?" + string.Join('&', qs);
+    }
+
+    private string SortIndicator(string col)
+    {
+        if (!string.Equals(_sortBy, col, StringComparison.OrdinalIgnoreCase))
+        {
+            return "↕";
+        }
+
+        return _sortDesc ? "↓" : "↑";
+    }
+
+    private static string GetRankBadgeClasses(int rank) => rank switch
+    {
+        1 => "bg-amber-400 text-white shadow-xs",
+        2 => "bg-slate-400 text-white shadow-xs",
+        3 => "bg-orange-400 text-white shadow-xs",
+        _ => "bg-slate-100 text-slate-600"
+    };
+
+    private static string GetRateBarColor(double rate) => rate switch
+    {
+        >= 75 => "bg-emerald-500",
+        >= 40 => "bg-amber-400",
+        _ => "bg-rose-500"
+    };
+
+    private static string GetRateTextColor(double rate) => rate switch
+    {
+        >= 75 => "text-emerald-700",
+        >= 40 => "text-amber-700",
+        _ => "text-rose-600"
+    };
+
+    private static string GetRateBadgeClasses(double rate) => rate switch
+    {
+        >= 75 => "bg-emerald-50 text-emerald-700 border border-emerald-200/80",
+        >= 40 => "bg-amber-50 text-amber-700 border border-amber-200/80",
+        _ => "bg-rose-50 text-rose-700 border border-rose-200/80"
+    };
+
+    public void Dispose()
+    {
+        Session.StateChanged -= HandleSessionChanged;
+    }
+}

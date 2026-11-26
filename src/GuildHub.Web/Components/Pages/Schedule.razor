@@ -1,17 +1,1700 @@
 @page "/schedule"
 @attribute [Authorize]
+@implements IDisposable
+@using System.Globalization
+@using GuildHub.Core.Domain.Enums
+@inject GuildSessionState Session
+@inject ScheduleService ScheduleService
+@inject DiscordSyncService SyncService
 
 <PageTitle>Lịch hoạt động — GuildHub</PageTitle>
 
-<div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-10 text-center max-w-2xl mx-auto">
-    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-brand-50 text-brand-700 border border-brand-200 mb-4">
-        Giai đoạn 2
-    </span>
-    <h2 class="text-xl font-extrabold text-slate-900">Lịch hoạt động (Schedule) tích hợp tự tạo form</h2>
-    <p class="text-sm text-slate-500 mt-2 leading-relaxed">
-        Phân hệ lịch tháng (T2–CN) cho phép đặt lịch Scrim / Bang chiến, chọn kênh Discord, Role tag, giờ Mở/Đóng điểm danh và tự động bắn form lên Discord khi đến giờ.
-    </p>
-    <a href="/" class="mt-6 inline-flex items-center px-5 py-2.5 rounded-xl bg-slatebtn hover:bg-slatebtn-hover text-white text-sm font-semibold transition">
-        ← Quay về Tổng quan
-    </a>
-</div>
+@if (Session.CurrentGuildId == 0)
+{
+    <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-10 text-center">
+        <p class="text-sm text-slate-500">Chưa có server Discord nào được chọn.</p>
+    </div>
+}
+else
+{
+    <div class="w-full space-y-5">
+        <!-- Toast thông báo -->
+        @if (!string.IsNullOrWhiteSpace(_toastMessage))
+        {
+            <div class="@GetToastClasses() border rounded-2xl px-4 py-3 text-sm font-medium flex items-center justify-between gap-3 shadow-xs">
+                <span>@_toastMessage</span>
+                <button type="button" @onclick="() => _toastMessage = null" class="font-bold opacity-60 hover:opacity-100 px-1 cursor-pointer">✕</button>
+            </div>
+        }
+
+        <!-- Hàng KPI tổng quan tháng -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500">Tổng lịch tháng @_currentMonth.Month</span>
+                    <span class="w-8 h-8 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <rect x="3" y="4" width="18" height="17" rx="2" />
+                            <path stroke-linecap="round" d="M8 2v4M16 2v4M3 10h18" />
+                        </svg>
+                    </span>
+                </div>
+                <div class="text-2xl font-extrabold text-slate-900 mt-2">@_monthData.TotalEvents</div>
+                <div class="text-xs text-slate-400 mt-0.5">Hoạt động đang lên lịch</div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500">Bang chiến</span>
+                    <span class="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                        <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                    </span>
+                </div>
+                <div class="text-2xl font-extrabold text-slate-900 mt-2">@_monthData.GuildWarCount</div>
+                <div class="text-xs text-slate-400 mt-0.5">Trận bang chiến tháng này</div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500">Giao hữu (Scrim)</span>
+                    <span class="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                        <span class="w-2.5 h-2.5 rounded-full bg-sky-500"></span>
+                    </span>
+                </div>
+                <div class="text-2xl font-extrabold text-slate-900 mt-2">@_monthData.ScrimCount</div>
+                <div class="text-xs text-slate-400 mt-0.5">Buổi tập / giao hữu</div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500">Form Discord</span>
+                    <span class="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </span>
+                </div>
+                <div class="text-2xl font-extrabold text-slate-900 mt-2">@_monthData.FormsCreatedCount</div>
+                <div class="text-xs text-slate-400 mt-0.5">@_monthData.PendingAutoCount lịch chờ tự mở form</div>
+            </div>
+        </div>
+
+        <!-- Khung Lịch tháng chính (KHÔNG đặt overflow-hidden để dropdown SearchSelect không bị cắt) -->
+        <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card">
+            <!-- Thanh điều khiển lịch -->
+            <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <div class="inline-flex items-center rounded-xl border border-slate-200 bg-slate-50/60 p-0.5">
+                        <button type="button"
+                                @onclick="PrevMonthAsync"
+                                title="Tháng trước"
+                                class="px-3 py-1.5 rounded-lg text-sm font-semibold text-slate-600 hover:bg-white hover:text-slate-900 transition cursor-pointer">
+                            ‹
+                        </button>
+                        <button type="button"
+                                @onclick="GoTodayAsync"
+                                class="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-700 hover:bg-white hover:text-brand-600 transition cursor-pointer">
+                            Hôm nay
+                        </button>
+                        <button type="button"
+                                @onclick="NextMonthAsync"
+                                title="Tháng sau"
+                                class="px-3 py-1.5 rounded-lg text-sm font-semibold text-slate-600 hover:bg-white hover:text-slate-900 transition cursor-pointer">
+                            ›
+                        </button>
+                    </div>
+
+                    <h2 class="text-lg font-extrabold text-slate-900 ml-1">
+                        Tháng @_currentMonth.Month / @_currentMonth.Year
+                    </h2>
+
+                    @if (_loadingCalendar)
+                    {
+                        <span class="w-4 h-4 border-2 border-brand-600 border-t-transparent rounded-full animate-spin ml-1"></span>
+                    }
+                </div>
+
+                <div class="flex items-center gap-2.5 flex-wrap">
+                    <SearchSelect Options="@EventTypeFilterOptions"
+                                  Value="@_filterTypeValue"
+                                  ValueChanged="HandleFilterTypeChangedAsync"
+                                  ShowSearch="false"
+                                  Compact="true"
+                                  WrapperClass="w-44" />
+
+                    <button type="button"
+                            @onclick="() => OpenCreateModalAsync(null)"
+                            class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold shadow-sm transition cursor-pointer whitespace-nowrap">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" d="M12 5v14M5 12h14" />
+                        </svg>
+                        <span>Tạo lịch mới</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Lưới lịch chuẩn Thứ 2 -> Chủ Nhật -->
+            <div class="overflow-x-auto">
+                <div class="min-w-[840px]">
+                    <!-- Tiêu đề các ngày trong tuần -->
+                    <div class="grid grid-cols-7 border-b border-slate-200/90 bg-slate-50/80">
+                        @foreach (var dayLabel in WeekdayHeaders)
+                        {
+                            var isWeekend = dayLabel is "Thứ 7" or "Chủ Nhật";
+                            <div class="py-2.5 px-3 text-center text-xs font-bold uppercase tracking-wider @(isWeekend ? "text-rose-600" : "text-slate-500")">
+                                @dayLabel
+                            </div>
+                        }
+                    </div>
+
+                    <!-- Các ô ngày -->
+                    <div class="grid grid-cols-7 divide-x divide-y divide-slate-100 border-b border-slate-100">
+                        @foreach (var day in _calendarDays)
+                        {
+                            var isCurrentMonth = day.Month == _currentMonth.Month && day.Year == _currentMonth.Year;
+                            var isToday = day == TodayVn;
+                            var dayItems = GetItemsForDay(day);
+
+                            <div class="min-h-[124px] p-2 flex flex-col gap-1.5 group transition @(isCurrentMonth ? "bg-white" : "bg-slate-50/60") @(isToday ? "ring-2 ring-inset ring-brand-500/40 bg-brand-50/20" : "")">
+                                <div class="flex items-center justify-between">
+                                    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold @(isToday ? "bg-brand-600 text-white shadow-xs" : isCurrentMonth ? "text-slate-700" : "text-slate-400")">
+                                        @day.Day
+                                    </span>
+
+                                    <button type="button"
+                                            @onclick="() => OpenCreateModalAsync(day)"
+                                            title="Thêm lịch ngày @day.ToString("dd/MM/yyyy")"
+                                            class="opacity-0 group-hover:opacity-100 focus:opacity-100 w-6 h-6 rounded-lg bg-slate-100 hover:bg-brand-100 text-slate-500 hover:text-brand-700 inline-flex items-center justify-center text-sm font-bold transition cursor-pointer">
+                                        +
+                                    </button>
+                                </div>
+
+                                <div class="flex flex-col gap-1.5 flex-1">
+                                    @foreach (var item in dayItems)
+                                    {
+                                        var localTime = item.ScheduledTimeUtc.ToOffset(VietnamOffset);
+                                        var chipClass = GetEventChipClasses(item);
+                                        var dotColor = GetEventTypeColor(item.EventType);
+
+                                        <button type="button"
+                                                @onclick="() => OpenDetailDrawerAsync(item)"
+                                                class="w-full text-left rounded-xl border px-2 py-1.5 transition hover:shadow-sm cursor-pointer @chipClass">
+                                            <div class="flex items-center gap-1.5 min-w-0">
+                                                <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:@dotColor"></span>
+                                                <span class="text-[11px] font-extrabold tabular-nums flex-shrink-0">@localTime.ToString("HH:mm")</span>
+                                                <span class="text-xs font-bold truncate @(item.IsCancelled ? "line-through" : "")">@item.Title</span>
+                                            </div>
+
+                                            <div class="mt-1 flex items-center justify-between gap-1 flex-wrap">
+                                                <span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none @GetFormStatusBadgeClasses(item.FormStatus)">
+                                                    @GetFormStatusShortLabel(item.FormStatus)
+                                                </span>
+
+                                                @if (item.WarEventId.HasValue)
+                                                {
+                                                    <span class="inline-flex items-center gap-0.5 text-[10px] font-bold text-slate-600 bg-white/80 px-1.5 py-0.5 rounded-md border border-slate-200/70">
+                                                        <span>@item.ActiveAttendeeCount</span>
+                                                        <span class="text-slate-400 font-medium">đăng ký</span>
+                                                    </span>
+                                                }
+                                            </div>
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chú thích màu sắc & trạng thái -->
+            <div class="px-5 py-3.5 bg-slate-50/50 rounded-b-2xl flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+                <div class="flex flex-wrap items-center gap-4">
+                    <span class="inline-flex items-center gap-1.5 font-medium">
+                        <span class="w-2.5 h-2.5 rounded-full bg-rose-600"></span> Bang chiến
+                    </span>
+                    <span class="inline-flex items-center gap-1.5 font-medium">
+                        <span class="w-2.5 h-2.5 rounded-full bg-sky-600"></span> Giao hữu
+                    </span>
+                    <span class="inline-flex items-center gap-1.5 font-medium">
+                        <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Hoạt động khác
+                    </span>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-100 text-emerald-700">Đã tạo form</span>
+                    <span class="px-2 py-0.5 rounded-md text-[11px] font-bold bg-indigo-100 text-indigo-700">Chờ tự tạo</span>
+                    <span class="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-200 text-slate-600">Đã đóng</span>
+                    <span class="text-slate-400 ml-1">Múi giờ GMT+7</span>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- MODAL TẠO / CHỈNH SỬA LỊCH HOẠT ĐỘNG -->
+@if (_showFormModal)
+{
+    <div class="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[2px] flex items-start justify-center p-4 sm:p-6 overflow-y-auto">
+        <div class="fixed inset-0" @onclick="CloseFormModal"></div>
+
+        <div class="relative z-10 w-full max-w-3xl bg-white rounded-3xl border border-slate-200/90 shadow-2xl my-6">
+            <!-- Header Modal -->
+            <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="text-xs font-semibold text-brand-600">
+                        @(_editingScheduleId.HasValue ? "Chỉnh sửa lịch hoạt động" : "Lên lịch hoạt động mới")
+                    </div>
+                    <h3 class="text-lg font-extrabold text-slate-900 mt-0.5 truncate">
+                        @(_editingScheduleId.HasValue ? _formTitle : "Tạo lịch & cấu hình form Discord")
+                    </h3>
+                </div>
+
+                <button type="button"
+                        @onclick="CloseFormModal"
+                        class="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 inline-flex items-center justify-center font-bold transition cursor-pointer flex-shrink-0">
+                    ✕
+                </button>
+            </div>
+
+            <!-- Body Modal -->
+            <div class="p-6 space-y-5">
+                @if (!string.IsNullOrWhiteSpace(_formError))
+                {
+                    <div class="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-4 py-3 text-xs font-semibold">
+                        ⚠️ @_formError
+                    </div>
+                }
+
+                <!-- Tiêu đề & Loại sự kiện -->
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+                    <div class="md:col-span-8">
+                        <label class="block text-xs font-bold text-slate-700 mb-1.5">Tiêu đề sự kiện *</label>
+                        <input type="text"
+                               @bind="_formTitle"
+                               maxlength="200"
+                               placeholder="VD: BANG CHIẾN TUẦN 12"
+                               class="w-full h-[38px] bg-white border border-slate-200 rounded-xl px-3.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500" />
+                    </div>
+
+                    <div class="md:col-span-4">
+                        <label class="block text-xs font-bold text-slate-700 mb-1.5">Loại hoạt động</label>
+                        <SearchSelect Options="@EventTypeSelectOptions"
+                                      @bind-Value="_formEventTypeStr"
+                                      ShowSearch="false" />
+                    </div>
+                </div>
+
+                <!-- Ngày & giờ bắt đầu (24h GMT+7) + Giờ đóng đăng ký -->
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+                    <div class="md:col-span-7">
+                        <div class="flex items-center justify-between gap-2 mb-1.5">
+                            <label class="text-xs font-bold text-slate-700">Thời gian online (24h · GMT+7) *</label>
+                            <div class="flex items-center gap-1">
+                                @foreach (var preset in QuickEventTimePresets)
+                                {
+                                    var isPicked = _formEventHour == preset.Hour && _formEventMinute == preset.Minute;
+                                    <button type="button"
+                                            @onclick="() => ApplyQuickEventTime(preset.Hour, preset.Minute)"
+                                            class="px-2 py-0.5 rounded-md text-[11px] font-bold transition cursor-pointer @(isPicked ? "bg-brand-600 text-white" : "bg-slate-100 hover:bg-brand-50 text-slate-600 hover:text-brand-700")">
+                                        @preset.Label
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <input type="date"
+                                   value="@_formEventDateStr"
+                                   @onchange="e => _formEventDateStr = e.Value?.ToString() ?? _formEventDateStr"
+                                   class="flex-1 min-w-[155px] h-[38px] bg-white border border-slate-200 rounded-xl px-3 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500" />
+
+                            <SearchSelect Options="@HourSelectOptions"
+                                          @bind-Value="_formEventHour"
+                                          SearchPlaceholder="Giờ..."
+                                          WrapperClass="w-[88px] flex-shrink-0"
+                                          MinDropdownWidthClass="min-w-[104px]" />
+
+                            <span class="text-slate-400 font-extrabold select-none">:</span>
+
+                            <SearchSelect Options="@MinuteSelectOptions"
+                                          @bind-Value="_formEventMinute"
+                                          SearchPlaceholder="Phút..."
+                                          WrapperClass="w-[88px] flex-shrink-0"
+                                          MinDropdownWidthClass="min-w-[104px]"
+                                          AlignRight="true" />
+                        </div>
+                    </div>
+
+                    <div class="md:col-span-5">
+                        <label class="block text-xs font-bold text-slate-700 mb-1.5">Đóng form đăng ký</label>
+                        <SearchSelect Options="@CloseOffsetOptions"
+                                      @bind-Value="_formClosePreset"
+                                      ShowSearch="false" />
+
+                        @if (_formClosePreset != "custom" && _formClosePreset != "none" && TryComputeClosePreview(out var closePreviewVn))
+                        {
+                            <div class="mt-1.5 text-[11px] font-medium text-slate-500">
+                                Đóng form lúc <span class="font-bold text-slate-700">@closePreviewVn.ToString("HH:mm · dd/MM/yyyy")</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                @if (_formClosePreset == "custom")
+                {
+                    <div class="bg-slate-50/80 border border-slate-200/80 rounded-2xl p-4">
+                        <label class="block text-xs font-bold text-slate-700 mb-2">Chọn ngày & giờ đóng form cụ thể (24h · GMT+7)</label>
+                        <div class="flex items-center gap-2 max-w-md">
+                            <input type="date"
+                                   value="@_formCloseDateStr"
+                                   @onchange="e => _formCloseDateStr = e.Value?.ToString() ?? _formCloseDateStr"
+                                   class="flex-1 min-w-[155px] h-[38px] bg-white border border-slate-200 rounded-xl px-3 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500" />
+
+                            <SearchSelect Options="@HourSelectOptions"
+                                          @bind-Value="_formCloseHour"
+                                          SearchPlaceholder="Giờ..."
+                                          WrapperClass="w-[88px] flex-shrink-0"
+                                          MinDropdownWidthClass="min-w-[104px]" />
+
+                            <span class="text-slate-400 font-extrabold select-none">:</span>
+
+                            <SearchSelect Options="@MinuteSelectOptions"
+                                          @bind-Value="_formCloseMinute"
+                                          SearchPlaceholder="Phút..."
+                                          WrapperClass="w-[88px] flex-shrink-0"
+                                          MinDropdownWidthClass="min-w-[104px]" />
+                        </div>
+                    </div>
+                }
+
+                <!-- Mô tả / Ghi chú -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1.5">Ghi chú hiển thị trên form (tùy chọn)</label>
+                    <textarea @bind="_formDescription"
+                              rows="2"
+                              maxlength="1500"
+                              placeholder="VD: Tập trung vào voice lúc 19:45, mang đầy đủ dược phẩm..."
+                              class="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500 resize-none"></textarea>
+                </div>
+
+                <!-- Khối cấu hình Form Discord -->
+                <div class="rounded-2xl border border-slate-200/90 bg-slate-50/60 p-4 space-y-4">
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="text-xs font-extrabold uppercase tracking-wider text-slate-600">
+                            Cấu hình Form Discord
+                        </div>
+
+                        @if (_editingHasCreatedForm)
+                        {
+                            <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                                Form đã được đăng
+                            </span>
+                        }
+                        else if (_loadingDiscordMeta)
+                        {
+                            <span class="text-xs text-slate-400">Đang tải kênh & role...</span>
+                        }
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1.5">Kênh Discord đăng form</label>
+                            <SearchSelect Options="@ChannelSelectOptions"
+                                          @bind-Value="_formChannelIdStr"
+                                          Placeholder="-- Chọn kênh text --"
+                                          SearchPlaceholder="Tìm kênh Discord..."
+                                          AllowClear="true"
+                                          Disabled="@(_editingHasCreatedForm || _loadingDiscordMeta)" />
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1.5">Role ping khi mở form</label>
+                            <SearchSelect Options="@RoleSelectOptions"
+                                          @bind-Value="_formMentionRoleIdStr"
+                                          Placeholder="-- Không tag Role --"
+                                          SearchPlaceholder="Tìm Role Discord..."
+                                          AllowClear="true"
+                                          Disabled="@(_editingHasCreatedForm || _loadingDiscordMeta)" />
+                        </div>
+                    </div>
+
+                    <!-- Bật tự động tạo form -->
+                    <div class="pt-3 border-t border-slate-200/70 space-y-3">
+                        <label class="inline-flex items-center gap-2.5 cursor-pointer select-none @(_editingHasCreatedForm ? "opacity-60 cursor-not-allowed" : "")">
+                            <input type="checkbox"
+                                   @bind="_formAutoCreate"
+                                   disabled="@_editingHasCreatedForm"
+                                   class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                            <span class="text-sm font-bold text-slate-800">Tự động bắn form đăng ký lên Discord khi đến giờ</span>
+                        </label>
+
+                        @if (_formAutoCreate && !_editingHasCreatedForm)
+                        {
+                            <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                                <div class="md:col-span-5">
+                                    <label class="block text-xs font-bold text-slate-600 mb-1.5">Thời điểm mở form</label>
+                                    <SearchSelect Options="@AutoCreateOffsetOptions"
+                                                  @bind-Value="_formAutoPreset"
+                                                  ShowSearch="false" />
+                                </div>
+
+                                <div class="md:col-span-7">
+                                    @if (_formAutoPreset == "custom")
+                                    {
+                                        <label class="block text-xs font-bold text-slate-600 mb-1.5">Ngày & giờ mở form (24h · GMT+7)</label>
+                                        <div class="flex items-center gap-2">
+                                            <input type="date"
+                                                   value="@_formAutoDateStr"
+                                                   @onchange="e => _formAutoDateStr = e.Value?.ToString() ?? _formAutoDateStr"
+                                                   class="flex-1 min-w-[145px] h-[38px] bg-white border border-slate-200 rounded-xl px-3 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500" />
+
+                                            <SearchSelect Options="@HourSelectOptions"
+                                                          @bind-Value="_formAutoHour"
+                                                          SearchPlaceholder="Giờ..."
+                                                          WrapperClass="w-[86px] flex-shrink-0"
+                                                          MinDropdownWidthClass="min-w-[104px]" />
+
+                                            <span class="text-slate-400 font-extrabold select-none">:</span>
+
+                                            <SearchSelect Options="@MinuteSelectOptions"
+                                                          @bind-Value="_formAutoMinute"
+                                                          SearchPlaceholder="Phút..."
+                                                          WrapperClass="w-[86px] flex-shrink-0"
+                                                          MinDropdownWidthClass="min-w-[104px]"
+                                                          AlignRight="true" />
+                                        </div>
+                                    }
+                                    else if (TryComputeAutoCreatePreview(out var previewVn))
+                                    {
+                                        <div class="h-[38px] flex items-center gap-2 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/80 rounded-xl px-3.5 whitespace-nowrap">
+                                            <span>Dự kiến đăng:</span>
+                                            <span class="font-extrabold">@previewVn.ToString("dd/MM/yyyy — HH:mm")</span>
+                                            <span class="text-indigo-500">(GMT+7)</span>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Modal -->
+            <div class="px-6 py-4 border-t border-slate-100 bg-slate-50/60 rounded-b-3xl flex items-center justify-end gap-2.5">
+                <button type="button"
+                        @onclick="CloseFormModal"
+                        class="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-sm font-semibold transition cursor-pointer">
+                    Hủy
+                </button>
+                <button type="button"
+                        @onclick="SaveScheduleAsync"
+                        disabled="@_savingForm"
+                        class="px-5 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold shadow-sm transition cursor-pointer">
+                    @(_savingForm ? "Đang lưu..." : (_editingScheduleId.HasValue ? "Lưu thay đổi" : "Tạo lịch"))
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- DRAWER CHI TIẾT SỰ KIỆN & DANH SÁCH ĐĂNG KÝ -->
+@if (_selectedItem is not null)
+{
+    var detailItem = _selectedItem;
+    var localStart = detailItem.ScheduledTimeUtc.ToOffset(VietnamOffset);
+    var isTriggeringThis = detailItem.ScheduledEventId.HasValue && _triggeringScheduleId == detailItem.ScheduledEventId.Value;
+
+    <div class="fixed inset-0 z-50 flex justify-end">
+        <div class="fixed inset-0 bg-slate-900/45 backdrop-blur-[1px]" @onclick="CloseDetailDrawer"></div>
+
+        <aside class="relative z-10 w-full max-w-xl bg-white h-full shadow-2xl border-l border-slate-200 flex flex-col">
+            <!-- Header Drawer -->
+            <div class="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold @GetEventTypeBadgeClasses(detailItem.EventType)">
+                            <span class="w-1.5 h-1.5 rounded-full" style="background:@GetEventTypeColor(detailItem.EventType)"></span>
+                            @GetEventTypeLabel(detailItem.EventType)
+                        </span>
+
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold @GetFormStatusBadgeClasses(detailItem.FormStatus)">
+                            @GetFormStatusFullLabel(detailItem.FormStatus)
+                        </span>
+
+                        @if (detailItem.Source == CalendarItemSource.BotWarEvent)
+                        {
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600">
+                                Tạo từ Bot
+                            </span>
+                        }
+                    </div>
+
+                    <h3 class="text-xl font-extrabold text-slate-900 mt-2 break-words @(detailItem.IsCancelled ? "line-through text-slate-400" : "")">
+                        @detailItem.Title
+                    </h3>
+                </div>
+
+                <button type="button"
+                        @onclick="CloseDetailDrawer"
+                        class="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 inline-flex items-center justify-center font-bold transition cursor-pointer flex-shrink-0">
+                    ✕
+                </button>
+            </div>
+
+            <!-- Nội dung cuộn của Drawer -->
+            <div class="flex-1 overflow-y-auto p-6 space-y-5">
+                <!-- Thông tin lịch -->
+                <div class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 space-y-2.5 text-sm">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-slate-500 font-medium">Thời gian online</span>
+                        <span class="font-bold text-slate-900">@localStart.ToString("dddd, dd/MM/yyyy — HH:mm", VietnameseCulture)</span>
+                    </div>
+
+                    @if (detailItem.CloseTimeUtc.HasValue)
+                    {
+                        var localClose = detailItem.CloseTimeUtc.Value.ToOffset(VietnamOffset);
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-slate-500 font-medium">Giờ đóng đăng ký</span>
+                            <span class="font-semibold text-slate-700">@localClose.ToString("dd/MM/yyyy — HH:mm")</span>
+                        </div>
+                    }
+
+                    @if (detailItem.TargetChannelId.HasValue)
+                    {
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-slate-500 font-medium">Kênh Discord</span>
+                            <span class="font-semibold text-slate-800">
+                                #@(string.IsNullOrWhiteSpace(detailItem.TargetChannelName) ? ResolveChannelName(detailItem.TargetChannelId.Value) : detailItem.TargetChannelName)
+                            </span>
+                        </div>
+                    }
+
+                    @if (detailItem.MentionRoleId.HasValue)
+                    {
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-slate-500 font-medium">Role thông báo</span>
+                            <span class="font-semibold text-brand-700">
+                                @(string.IsNullOrWhiteSpace(detailItem.MentionRoleName) ? ResolveRoleName(detailItem.MentionRoleId.Value) : FormatRoleLabel(detailItem.MentionRoleName))
+                            </span>
+                        </div>
+                    }
+
+                    @if (detailItem.AutoCreateForm && detailItem.AutoCreateAtUtc.HasValue && !detailItem.WarEventId.HasValue)
+                    {
+                        var localAuto = detailItem.AutoCreateAtUtc.Value.ToOffset(VietnamOffset);
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-slate-500 font-medium">Tự động mở form lúc</span>
+                            <span class="font-bold text-indigo-700">@localAuto.ToString("dd/MM/yyyy — HH:mm")</span>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(detailItem.Description))
+                    {
+                        <div class="pt-2 border-t border-slate-200/80 text-xs text-slate-600 whitespace-pre-line">
+                            @detailItem.Description
+                        </div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(detailItem.LastFormError))
+                {
+                    <div class="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-4 py-3 text-xs font-medium">
+                        ⚠️ <strong>Lỗi tạo form gần nhất:</strong> @detailItem.LastFormError
+                    </div>
+                }
+
+                <!-- Thanh nút thao tác -->
+                <div class="flex flex-wrap items-center gap-2">
+                    @if (detailItem.Source == CalendarItemSource.Scheduled && detailItem.ScheduledEventId.HasValue)
+                    {
+                        @if (!detailItem.WarEventId.HasValue && !detailItem.IsCancelled)
+                        {
+                            <button type="button"
+                                    @onclick="() => TriggerFormNowAsync(detailItem)"
+                                    disabled="@(isTriggeringThis || detailItem.TriggerFormNow)"
+                                    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-xs font-bold shadow-sm transition cursor-pointer">
+                                @if (isTriggeringThis || detailItem.TriggerFormNow)
+                                {
+                                    <span class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                    <span>Đang gửi form lên Discord...</span>
+                                }
+                                else
+                                {
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                    </svg>
+                                    <span>Tạo form ngay</span>
+                                }
+                            </button>
+                        }
+
+                        <button type="button"
+                                @onclick="() => OpenEditModalAsync(detailItem)"
+                                class="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer">
+                            Chỉnh sửa
+                        </button>
+
+                        <button type="button"
+                                @onclick="() => ToggleCancelAsync(detailItem)"
+                                class="px-3.5 py-2 rounded-xl bg-white hover:bg-amber-50 border border-slate-200 hover:border-amber-200 text-slate-700 hover:text-amber-700 text-xs font-bold transition cursor-pointer">
+                            @(detailItem.IsCancelled ? "Khôi phục lịch" : "Hủy lịch")
+                        </button>
+
+                        @if (_confirmDeleteId == detailItem.ScheduledEventId)
+                        {
+                            <button type="button"
+                                    @onclick="() => DeleteScheduleAsync(detailItem.ScheduledEventId.Value)"
+                                    class="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition cursor-pointer">
+                                Xác nhận xóa
+                            </button>
+                            <button type="button"
+                                    @onclick="() => _confirmDeleteId = null"
+                                    class="px-2.5 py-2 rounded-xl text-slate-500 hover:text-slate-800 text-xs font-semibold cursor-pointer">
+                                Thôi
+                            </button>
+                        }
+                        else
+                        {
+                            <button type="button"
+                                    @onclick="() => _confirmDeleteId = detailItem.ScheduledEventId"
+                                    class="px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-rose-600 text-xs font-bold transition cursor-pointer">
+                                Xóa
+                            </button>
+                        }
+                    }
+
+                    @if (detailItem.WarEventId.HasValue && detailItem.TargetChannelId.HasValue && detailItem.DiscordMessageId.HasValue)
+                    {
+                        <a href="https://discord.com/channels/@Session.CurrentGuildId/@detailItem.TargetChannelId.Value/@detailItem.DiscordMessageId.Value"
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition ml-auto">
+                            <span>Mở form trên Discord</span>
+                            <span>↗</span>
+                        </a>
+                    }
+                </div>
+
+                <!-- Phần Danh sách đăng ký nhanh (nếu đã có WarEvent) -->
+                @if (detailItem.WarEventId.HasValue)
+                {
+                    <div class="pt-4 border-t border-slate-200/80 space-y-4">
+                        <div class="flex items-center justify-between gap-2">
+                            <h4 class="text-sm font-extrabold text-slate-900">
+                                Danh sách đăng ký
+                                <span class="text-xs font-semibold text-slate-400 ml-1">#@detailItem.WarEventId</span>
+                            </h4>
+
+                            <button type="button"
+                                    @onclick="() => LoadSignupDetailAsync(detailItem.WarEventId.Value)"
+                                    disabled="@_loadingSignups"
+                                    class="text-xs font-bold text-brand-600 hover:text-brand-700 cursor-pointer">
+                                @(_loadingSignups ? "Đang tải..." : "Làm mới")
+                            </button>
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(_signupError))
+                        {
+                            <div class="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-4 py-3 text-xs font-medium">
+                                ⚠️ @_signupError
+                            </div>
+                        }
+                        else if (_loadingSignups && _signupDetail is null)
+                        {
+                            <div class="py-10 text-center text-sm text-slate-400">Đang tải danh sách đăng ký...</div>
+                        }
+                        else if (_signupDetail is not null)
+                        {
+                            <!-- Tóm tắt trạng thái & vai trò -->
+                            <div class="grid grid-cols-5 gap-2 text-center">
+                                <div class="rounded-xl bg-emerald-50 border border-emerald-200/70 py-2 px-1">
+                                    <div class="text-base font-extrabold text-emerald-700">@_signupDetail.ConfirmedCount</div>
+                                    <div class="text-[10px] font-bold text-emerald-600">Tham gia</div>
+                                </div>
+                                <div class="rounded-xl bg-amber-50 border border-amber-200/70 py-2 px-1">
+                                    <div class="text-base font-extrabold text-amber-700">@_signupDetail.LateCount</div>
+                                    <div class="text-[10px] font-bold text-amber-600">Đi trễ</div>
+                                </div>
+                                <div class="rounded-xl bg-sky-50 border border-sky-200/70 py-2 px-1">
+                                    <div class="text-base font-extrabold text-sky-700">@_signupDetail.BenchCount</div>
+                                    <div class="text-[10px] font-bold text-sky-600">Dự bị</div>
+                                </div>
+                                <div class="rounded-xl bg-rose-50 border border-rose-200/70 py-2 px-1">
+                                    <div class="text-base font-extrabold text-rose-700">@_signupDetail.AbsentCount</div>
+                                    <div class="text-[10px] font-bold text-rose-600">Báo vắng</div>
+                                </div>
+                                <div class="rounded-xl bg-slate-100 border border-slate-200/70 py-2 px-1">
+                                    <div class="text-base font-extrabold text-slate-600">@_signupDetail.NotParticipatingCount</div>
+                                    <div class="text-[10px] font-bold text-slate-500">Không đi</div>
+                                </div>
+                            </div>
+
+                            <!-- Vai trò & Hệ phái -->
+                            <div class="flex flex-wrap items-center gap-2 text-xs">
+                                <span class="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 font-bold border border-amber-200/70">
+                                    Tank: @_signupDetail.TankCount
+                                </span>
+                                <span class="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-800 font-bold border border-rose-200/70">
+                                    DPS: @_signupDetail.DpsCount
+                                </span>
+                                <span class="px-2.5 py-1 rounded-lg bg-pink-50 text-pink-800 font-bold border border-pink-200/70">
+                                    Healer: @_signupDetail.HealerCount
+                                </span>
+                            </div>
+
+                            @if (_signupDetail.ClassBreakdowns.Count > 0)
+                            {
+                                <div class="flex flex-wrap gap-1.5">
+                                    @foreach (var cb in _signupDetail.ClassBreakdowns)
+                                    {
+                                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-bold"
+                                              style="background:@($"{cb.HexColor}14"); border-color:@($"{cb.HexColor}44"); color:@cb.HexColor">
+                                            <img src="/icons/@cb.IconFileName" alt="@cb.DisplayName" class="w-3.5 h-3.5 object-contain" />
+                                            <span>@cb.DisplayName</span>
+                                            <span class="font-extrabold">@cb.Count</span>
+                                        </span>
+                                    }
+                                </div>
+                            }
+
+                            <!-- Lọc danh sách đăng ký -->
+                            <div class="flex items-center gap-2">
+                                <input type="text"
+                                       @bind="_signupSearch"
+                                       @bind:event="oninput"
+                                       placeholder="Tìm tên thành viên..."
+                                       class="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
+
+                                <SearchSelect Options="@SignupStatusFilterOptions"
+                                              @bind-Value="_signupStatusFilter"
+                                              ShowSearch="false"
+                                              Compact="true"
+                                              AlignRight="true"
+                                              WrapperClass="w-40" />
+                            </div>
+
+                            <!-- Bảng người đăng ký -->
+                            var filteredSignups = GetFilteredSignups();
+
+                            @if (filteredSignups.Count == 0)
+                            {
+                                <div class="py-8 text-center text-xs text-slate-400 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
+                                    Chưa có thành viên nào phù hợp bộ lọc.
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="divide-y divide-slate-100 rounded-2xl border border-slate-200/80 overflow-hidden">
+                                    @foreach (var row in filteredSignups)
+                                    {
+                                        <div class="px-3.5 py-2.5 flex items-center justify-between gap-2 hover:bg-sky-50/40 transition">
+                                            <div class="flex items-center gap-2.5 min-w-0">
+                                                <span class="text-[11px] font-bold text-slate-400 w-6 text-right flex-shrink-0">#@row.SignupOrder</span>
+
+                                                @if (!string.IsNullOrWhiteSpace(row.AvatarUrl))
+                                                {
+                                                    <img src="@row.AvatarUrl" alt="" class="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 flex-shrink-0" />
+                                                }
+                                                else
+                                                {
+                                                    <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold text-xs flex items-center justify-center flex-shrink-0">
+                                                        @(row.DisplayName.Length > 0 ? char.ToUpperInvariant(row.DisplayName[0]) : '?')
+                                                    </div>
+                                                }
+
+                                                <div class="min-w-0">
+                                                    <div class="text-xs font-bold text-slate-800 truncate">
+                                                        @(string.IsNullOrWhiteSpace(row.IngameNickname) ? row.DisplayName : row.IngameNickname)
+                                                    </div>
+                                                    @if (!string.IsNullOrWhiteSpace(row.IngameNickname) && !string.Equals(row.IngameNickname, row.DisplayName, StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        <div class="text-[11px] text-slate-400 truncate">@row.DisplayName</div>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(row.Note))
+                                                    {
+                                                        <div class="text-[11px] text-amber-700 italic truncate">“@row.Note”</div>
+                                                    }
+                                                </div>
+                                            </div>
+
+                                            <div class="flex items-center gap-1.5 flex-shrink-0">
+                                                @if (!string.IsNullOrWhiteSpace(row.ClassDisplayName))
+                                                {
+                                                    var hex = row.ClassHexColor ?? "#6366F1";
+                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold border"
+                                                          style="background:@($"{hex}14"); border-color:@($"{hex}44"); color:@hex">
+                                                        @if (!string.IsNullOrWhiteSpace(row.ClassIconFileName))
+                                                        {
+                                                            <img src="/icons/@row.ClassIconFileName" alt="" class="w-3.5 h-3.5 object-contain" />
+                                                        }
+                                                        <span>@row.ClassDisplayName</span>
+                                                    </span>
+                                                }
+
+                                                <span class="px-2 py-0.5 rounded-lg text-[10px] font-bold @GetSignupStatusBadgeClasses(row.Status)">
+                                                    @GetSignupStatusShortLabel(row.Status)
+                                                </span>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                }
+            </div>
+        </aside>
+    </div>
+}
+
+@code {
+    private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
+    private static readonly CultureInfo VietnameseCulture = new("vi-VN");
+    private static readonly string[] WeekdayHeaders = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ Nhật"];
+
+    private static DateOnly TodayVn => DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(VietnamOffset).DateTime);
+
+    private DateOnly _currentMonth = new(TodayVn.Year, TodayVn.Month, 1);
+    private List<DateOnly> _calendarDays = [];
+    private ScheduleCalendarMonthResult _monthData = new([], 0, 0, 0, 0, 0, 0);
+    private Dictionary<DateOnly, List<CalendarEventItem>> _itemsByDay = new();
+
+    private bool _loadingCalendar;
+    private string? _filterTypeValue = "";
+
+    private string? _toastMessage;
+    private string _toastKind = "success";
+
+    // Discord Channels & Roles cache cho guild hiện tại
+    private ulong _loadedMetaGuildId;
+    private bool _loadingDiscordMeta;
+    private List<DiscordChannelOption> _channels = [];
+    private List<DiscordRoleOption> _roles = [];
+
+    // Modal Tạo / Sửa lịch
+    private bool _showFormModal;
+    private bool _savingForm;
+    private string? _formError;
+    private long? _editingScheduleId;
+    private bool _editingHasCreatedForm;
+
+    private string _formTitle = string.Empty;
+    private string _formDescription = string.Empty;
+    private string? _formEventTypeStr = ((int)EventType.GuildWar).ToString();
+    private string _formEventDateStr = string.Empty;
+    private string? _formEventHour = "20";
+    private string? _formEventMinute = "00";
+    private string? _formClosePreset = "30";
+    private string _formCloseDateStr = string.Empty;
+    private string? _formCloseHour = "19";
+    private string? _formCloseMinute = "30";
+    private string? _formChannelIdStr = string.Empty;
+    private string? _formMentionRoleIdStr = string.Empty;
+    private bool _formAutoCreate = true;
+    private string? _formAutoPreset = "24";
+    private string _formAutoDateStr = string.Empty;
+    private string? _formAutoHour = "20";
+    private string? _formAutoMinute = "00";
+
+    // Drawer chi tiết & danh sách đăng ký
+    private CalendarEventItem? _selectedItem;
+    private WarEventSignupDetail? _signupDetail;
+    private string? _signupError;
+    private bool _loadingSignups;
+    private string _signupSearch = string.Empty;
+    private string? _signupStatusFilter = "";
+    private long? _confirmDeleteId;
+    private long? _triggeringScheduleId;
+    private CancellationTokenSource? _pollCts;
+
+    private static readonly (string Hour, string Minute, string Label)[] QuickEventTimePresets =
+    [
+        ("19", "30", "19:30"),
+        ("20", "00", "20:00"),
+        ("20", "30", "20:30"),
+        ("21", "00", "21:00")
+    ];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> HourSelectOptions =
+        Enumerable.Range(0, 24)
+            .Select(h => new SearchSelect.SelectOption(h.ToString("00"), $"{h:00}h"))
+            .ToList();
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> MinuteSelectOptions =
+        Enumerable.Range(0, 60)
+            .Select(m => new SearchSelect.SelectOption(m.ToString("00"), $"{m:00}p"))
+            .ToList();
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> EventTypeFilterOptions =
+    [
+        new("", "Tất cả hoạt động"),
+        new(((int)EventType.GuildWar).ToString(), "Bang chiến", ColorDot: "#e11d48"),
+        new(((int)EventType.Scrim).ToString(), "Giao hữu", ColorDot: "#0284c7"),
+        new(((int)EventType.Other).ToString(), "Hoạt động khác", ColorDot: "#d97706")
+    ];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> EventTypeSelectOptions =
+    [
+        new(((int)EventType.GuildWar).ToString(), "Bang chiến", ColorDot: "#e11d48"),
+        new(((int)EventType.Scrim).ToString(), "Giao hữu", ColorDot: "#0284c7"),
+        new(((int)EventType.Other).ToString(), "Hoạt động khác", ColorDot: "#d97706")
+    ];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> CloseOffsetOptions =
+    [
+        new("15", "Trước giờ chiến 15 phút"),
+        new("30", "Trước giờ chiến 30 phút"),
+        new("60", "Trước giờ chiến 1 giờ"),
+        new("120", "Trước giờ chiến 2 giờ"),
+        new("custom", "Chọn ngày giờ cụ thể"),
+        new("none", "Không tự động đóng")
+    ];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> AutoCreateOffsetOptions =
+    [
+        new("6", "Trước giờ chiến 6 giờ"),
+        new("12", "Trước giờ chiến 12 giờ"),
+        new("24", "Trước giờ chiến 24 giờ"),
+        new("48", "Trước giờ chiến 48 giờ"),
+        new("72", "Trước giờ chiến 72 giờ"),
+        new("custom", "Chọn ngày giờ cụ thể")
+    ];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> SignupStatusFilterOptions =
+    [
+        new("", "Tất cả trạng thái"),
+        new("active", "Tham gia + Trễ + Dự bị"),
+        new(((int)SignupStatus.Confirmed).ToString(), "Tham gia", ColorDot: "#10b981"),
+        new(((int)SignupStatus.Late).ToString(), "Đi trễ", ColorDot: "#f59e0b"),
+        new(((int)SignupStatus.Bench).ToString(), "Dự bị", ColorDot: "#0284c7"),
+        new(((int)SignupStatus.Absent).ToString(), "Báo vắng", ColorDot: "#e11d48"),
+        new(((int)SignupStatus.NotParticipating).ToString(), "Không tham gia", ColorDot: "#64748b")
+    ];
+
+    private IReadOnlyList<SearchSelect.SelectOption> ChannelSelectOptions =>
+        _channels.Select(c => new SearchSelect.SelectOption(
+            Value: c.ChannelId.ToString(),
+            Label: $"#{c.Name}",
+            SubLabel: c.IsAnnouncement
+                ? (string.IsNullOrWhiteSpace(c.CategoryName) ? "Kênh thông báo" : $"{c.CategoryName} · Thông báo")
+                : c.CategoryName))
+            .ToList();
+
+    private IReadOnlyList<SearchSelect.SelectOption> RoleSelectOptions =>
+        _roles.Select(r => new SearchSelect.SelectOption(
+            Value: r.RoleId.ToString(),
+            Label: FormatRoleLabel(r.Name),
+            ColorDot: r.Color > 0 ? $"#{r.Color:X6}" : "#94a3b8"))
+            .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.StateChanged += HandleSessionChanged;
+        BuildCalendarGrid();
+        await LoadCalendarAsync();
+        _ = EnsureDiscordMetadataLoadedAsync();
+    }
+
+    private void HandleSessionChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            _selectedItem = null;
+            _signupDetail = null;
+            _showFormModal = false;
+            await LoadCalendarAsync();
+            await EnsureDiscordMetadataLoadedAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void BuildCalendarGrid()
+    {
+        var firstOfMonth = new DateOnly(_currentMonth.Year, _currentMonth.Month, 1);
+        var daysInMonth = DateTime.DaysInMonth(_currentMonth.Year, _currentMonth.Month);
+        var lastOfMonth = new DateOnly(_currentMonth.Year, _currentMonth.Month, daysInMonth);
+
+        // Thứ 2 = 0 ... Chủ Nhật = 6
+        var startOffset = ((int)firstOfMonth.DayOfWeek + 6) % 7;
+        var gridStart = firstOfMonth.AddDays(-startOffset);
+
+        var endOffset = 6 - (((int)lastOfMonth.DayOfWeek + 6) % 7);
+        var gridEnd = lastOfMonth.AddDays(endOffset);
+
+        var days = new List<DateOnly>();
+        for (var d = gridStart; d <= gridEnd; d = d.AddDays(1))
+        {
+            days.Add(d);
+        }
+
+        _calendarDays = days;
+    }
+
+    private async Task LoadCalendarAsync()
+    {
+        if (Session.CurrentGuildId == 0 || _calendarDays.Count == 0)
+        {
+            return;
+        }
+
+        _loadingCalendar = true;
+        StateHasChanged();
+
+        try
+        {
+            var rangeStartUtc = new DateTimeOffset(_calendarDays[0].ToDateTime(TimeOnly.MinValue), VietnamOffset).ToUniversalTime();
+            var rangeEndUtc = new DateTimeOffset(_calendarDays[^1].AddDays(1).ToDateTime(TimeOnly.MinValue), VietnamOffset).ToUniversalTime();
+
+            var monthStartUtc = new DateTimeOffset(_currentMonth.ToDateTime(TimeOnly.MinValue), VietnamOffset).ToUniversalTime();
+            var monthEndUtc = new DateTimeOffset(_currentMonth.AddMonths(1).ToDateTime(TimeOnly.MinValue), VietnamOffset).ToUniversalTime();
+
+            EventType? filterType = int.TryParse(_filterTypeValue, out var typeInt) ? (EventType)typeInt : null;
+
+            _monthData = await ScheduleService.GetCalendarRangeAsync(
+                Session.CurrentGuildId,
+                rangeStartUtc,
+                rangeEndUtc,
+                monthStartUtc,
+                monthEndUtc,
+                filterType);
+
+            _itemsByDay = _monthData.Items
+                .GroupBy(i => DateOnly.FromDateTime(i.ScheduledTimeUtc.ToOffset(VietnamOffset).DateTime))
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            // Đồng bộ lại _selectedItem nếu Drawer đang mở
+            if (_selectedItem is not null)
+            {
+                _selectedItem = _monthData.Items.FirstOrDefault(i =>
+                    (_selectedItem.ScheduledEventId.HasValue && i.ScheduledEventId == _selectedItem.ScheduledEventId)
+                    || (!_selectedItem.ScheduledEventId.HasValue && _selectedItem.WarEventId.HasValue && i.WarEventId == _selectedItem.WarEventId));
+            }
+        }
+        finally
+        {
+            _loadingCalendar = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task EnsureDiscordMetadataLoadedAsync()
+    {
+        if (Session.CurrentGuildId == 0 || _loadedMetaGuildId == Session.CurrentGuildId)
+        {
+            return;
+        }
+
+        _loadingDiscordMeta = true;
+        StateHasChanged();
+
+        try
+        {
+            var guildId = Session.CurrentGuildId;
+            var channelsTask = SyncService.GetGuildTextChannelsAsync(guildId);
+            var rolesTask = SyncService.GetGuildRolesAsync(guildId, includeEveryone: true);
+            await Task.WhenAll(channelsTask, rolesTask);
+
+            _channels = channelsTask.Result;
+            _roles = rolesTask.Result;
+            _loadedMetaGuildId = guildId;
+        }
+        finally
+        {
+            _loadingDiscordMeta = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task PrevMonthAsync()
+    {
+        _currentMonth = _currentMonth.AddMonths(-1);
+        BuildCalendarGrid();
+        await LoadCalendarAsync();
+    }
+
+    private async Task NextMonthAsync()
+    {
+        _currentMonth = _currentMonth.AddMonths(1);
+        BuildCalendarGrid();
+        await LoadCalendarAsync();
+    }
+
+    private async Task GoTodayAsync()
+    {
+        _currentMonth = new DateOnly(TodayVn.Year, TodayVn.Month, 1);
+        BuildCalendarGrid();
+        await LoadCalendarAsync();
+    }
+
+    private async Task HandleFilterTypeChangedAsync(string? value)
+    {
+        _filterTypeValue = value ?? string.Empty;
+        await LoadCalendarAsync();
+    }
+
+    private void ApplyQuickEventTime(string hour, string minute)
+    {
+        _formEventHour = hour;
+        _formEventMinute = minute;
+    }
+
+    private async Task OpenCreateModalAsync(DateOnly? prefillDate)
+    {
+        await EnsureDiscordMetadataLoadedAsync();
+
+        var targetDate = prefillDate ?? TodayVn;
+        _editingScheduleId = null;
+        _editingHasCreatedForm = false;
+        _formError = null;
+
+        _formTitle = string.Empty;
+        _formDescription = string.Empty;
+        _formEventTypeStr = ((int)EventType.GuildWar).ToString();
+        _formEventDateStr = targetDate.ToString("yyyy-MM-dd");
+        _formEventHour = "20";
+        _formEventMinute = "00";
+        _formClosePreset = "30";
+        _formCloseDateStr = targetDate.ToString("yyyy-MM-dd");
+        _formCloseHour = "19";
+        _formCloseMinute = "30";
+        _formAutoCreate = true;
+        _formAutoPreset = "24";
+        _formAutoDateStr = targetDate.AddDays(-1).ToString("yyyy-MM-dd");
+        _formAutoHour = "20";
+        _formAutoMinute = "00";
+
+        // Giữ lại kênh/role vừa chọn gần nhất hoặc mặc định trống
+        _showFormModal = true;
+    }
+
+    private async Task OpenEditModalAsync(CalendarEventItem item)
+    {
+        if (!item.ScheduledEventId.HasValue)
+        {
+            return;
+        }
+
+        await EnsureDiscordMetadataLoadedAsync();
+
+        var localStart = item.ScheduledTimeUtc.ToOffset(VietnamOffset);
+        _editingScheduleId = item.ScheduledEventId.Value;
+        _editingHasCreatedForm = item.WarEventId.HasValue;
+        _formError = null;
+
+        _formTitle = item.Title;
+        _formDescription = item.Description ?? string.Empty;
+        _formEventTypeStr = ((int)item.EventType).ToString();
+        _formEventDateStr = localStart.ToString("yyyy-MM-dd");
+        _formEventHour = localStart.ToString("HH");
+        _formEventMinute = localStart.ToString("mm");
+
+        if (!item.CloseTimeUtc.HasValue)
+        {
+            _formClosePreset = "none";
+            _formCloseDateStr = localStart.ToString("yyyy-MM-dd");
+            _formCloseHour = localStart.AddMinutes(-30).ToString("HH");
+            _formCloseMinute = localStart.AddMinutes(-30).ToString("mm");
+        }
+        else
+        {
+            var localClose = item.CloseTimeUtc.Value.ToOffset(VietnamOffset);
+            _formCloseDateStr = localClose.ToString("yyyy-MM-dd");
+            _formCloseHour = localClose.ToString("HH");
+            _formCloseMinute = localClose.ToString("mm");
+
+            var diffMins = (int)Math.Round((item.ScheduledTimeUtc - item.CloseTimeUtc.Value).TotalMinutes);
+            _formClosePreset = diffMins is 15 or 30 or 60 or 120 ? diffMins.ToString() : "custom";
+        }
+
+        _formChannelIdStr = item.TargetChannelId?.ToString() ?? string.Empty;
+        _formMentionRoleIdStr = item.MentionRoleId?.ToString() ?? string.Empty;
+        _formAutoCreate = item.AutoCreateForm;
+
+        if (item.AutoCreateForm && item.AutoCreateAtUtc.HasValue)
+        {
+            var localAuto = item.AutoCreateAtUtc.Value.ToOffset(VietnamOffset);
+            _formAutoDateStr = localAuto.ToString("yyyy-MM-dd");
+            _formAutoHour = localAuto.ToString("HH");
+            _formAutoMinute = localAuto.ToString("mm");
+
+            var diffHours = (int)Math.Round((item.ScheduledTimeUtc - item.AutoCreateAtUtc.Value).TotalHours);
+            var exactDiffMins = Math.Abs((item.ScheduledTimeUtc - item.AutoCreateAtUtc.Value).TotalMinutes - diffHours * 60);
+            _formAutoPreset = exactDiffMins < 1 && diffHours is 6 or 12 or 24 or 48 or 72 ? diffHours.ToString() : "custom";
+        }
+        else
+        {
+            var defaultAuto = localStart.AddDays(-1);
+            _formAutoPreset = "24";
+            _formAutoDateStr = defaultAuto.ToString("yyyy-MM-dd");
+            _formAutoHour = defaultAuto.ToString("HH");
+            _formAutoMinute = defaultAuto.ToString("mm");
+        }
+
+        _showFormModal = true;
+    }
+
+    private void CloseFormModal()
+    {
+        _showFormModal = false;
+        _formError = null;
+    }
+
+    private async Task SaveScheduleAsync()
+    {
+        _formError = null;
+
+        if (!TryParseVnDateTime(_formEventDateStr, _formEventHour, _formEventMinute, out var scheduledLocal))
+        {
+            _formError = "Vui lòng chọn ngày và giờ bắt đầu hợp lệ.";
+            return;
+        }
+
+        DateTimeOffset? closeTimeUtc = null;
+        if (_formClosePreset == "custom")
+        {
+            if (!TryParseVnDateTime(_formCloseDateStr, _formCloseHour, _formCloseMinute, out var closeLocal))
+            {
+                _formError = "Vui lòng chọn ngày và giờ đóng form hợp lệ.";
+                return;
+            }
+            closeTimeUtc = closeLocal.ToUniversalTime();
+        }
+        else if (int.TryParse(_formClosePreset, out var closeMins))
+        {
+            closeTimeUtc = scheduledLocal.AddMinutes(-closeMins).ToUniversalTime();
+        }
+
+        DateTimeOffset? autoCreateAtUtc = null;
+        if (_formAutoCreate && !_editingHasCreatedForm)
+        {
+            if (_formAutoPreset == "custom")
+            {
+                if (!TryParseVnDateTime(_formAutoDateStr, _formAutoHour, _formAutoMinute, out var autoLocal))
+                {
+                    _formError = "Vui lòng chọn thời điểm tự động mở form hợp lệ.";
+                    return;
+                }
+                autoCreateAtUtc = autoLocal.ToUniversalTime();
+            }
+            else if (int.TryParse(_formAutoPreset, out var autoHours))
+            {
+                autoCreateAtUtc = scheduledLocal.AddHours(-autoHours).ToUniversalTime();
+            }
+        }
+
+        ulong? channelId = ulong.TryParse(_formChannelIdStr, out var cid) ? cid : null;
+        var channelName = channelId.HasValue ? _channels.FirstOrDefault(c => c.ChannelId == channelId.Value)?.Name : null;
+
+        ulong? roleId = ulong.TryParse(_formMentionRoleIdStr, out var rid) ? rid : null;
+        var roleName = roleId.HasValue ? _roles.FirstOrDefault(r => r.RoleId == roleId.Value)?.Name : null;
+
+        var eventType = int.TryParse(_formEventTypeStr, out var et) ? (EventType)et : EventType.GuildWar;
+
+        var request = new ScheduleUpsertRequest(
+            Title: _formTitle,
+            Description: _formDescription,
+            EventType: eventType,
+            ScheduledTimeUtc: scheduledLocal.ToUniversalTime(),
+            CloseTimeUtc: closeTimeUtc,
+            AutoCreateForm: _formAutoCreate,
+            AutoCreateAtUtc: autoCreateAtUtc,
+            TargetChannelId: channelId,
+            TargetChannelName: channelName,
+            MentionRoleId: roleId,
+            MentionRoleName: roleName);
+
+        _savingForm = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = _editingScheduleId.HasValue
+                ? await ScheduleService.UpdateScheduleAsync(Session.CurrentGuildId, _editingScheduleId.Value, request)
+                : await ScheduleService.CreateScheduleAsync(Session.CurrentGuildId, Session.User?.UserId ?? 0, request);
+
+            if (!result.Success)
+            {
+                _formError = result.Message;
+                return;
+            }
+
+            _showFormModal = false;
+            ShowToast(result.Message, "success");
+
+            // Nếu sự kiện mới nằm ở tháng khác -> chuyển lịch tới tháng đó để Admin thấy ngay
+            var eventMonth = new DateOnly(scheduledLocal.Year, scheduledLocal.Month, 1);
+            if (eventMonth != _currentMonth)
+            {
+                _currentMonth = eventMonth;
+                BuildCalendarGrid();
+            }
+
+            await LoadCalendarAsync();
+        }
+        finally
+        {
+            _savingForm = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenDetailDrawerAsync(CalendarEventItem item)
+    {
+        _selectedItem = item;
+        _confirmDeleteId = null;
+        _signupDetail = null;
+        _signupError = null;
+        _signupSearch = string.Empty;
+        _signupStatusFilter = string.Empty;
+
+        _ = EnsureDiscordMetadataLoadedAsync();
+
+        if (item.WarEventId.HasValue)
+        {
+            await LoadSignupDetailAsync(item.WarEventId.Value);
+        }
+    }
+
+    private void CloseDetailDrawer()
+    {
+        _selectedItem = null;
+        _signupDetail = null;
+        _signupError = null;
+        _confirmDeleteId = null;
+    }
+
+    private async Task LoadSignupDetailAsync(long warEventId)
+    {
+        _loadingSignups = true;
+        _signupError = null;
+        StateHasChanged();
+
+        try
+        {
+            _signupDetail = await ScheduleService.GetWarEventSignupDetailAsync(Session.CurrentGuildId, warEventId);
+        }
+        catch (Exception ex)
+        {
+            _signupError = $"Không thể tải danh sách đăng ký: {ex.Message}";
+        }
+        finally
+        {
+            _loadingSignups = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task TriggerFormNowAsync(CalendarEventItem item)
+    {
+        if (!item.ScheduledEventId.HasValue)
+        {
+            return;
+        }
+
+        var scheduleId = item.ScheduledEventId.Value;
+        var result = await ScheduleService.TriggerFormNowAsync(Session.CurrentGuildId, scheduleId);
+        if (!result.Success)
+        {
+            ShowToast(result.Message, "error");
+            return;
+        }
+
+        ShowToast(result.Message, "info");
+        _triggeringScheduleId = scheduleId;
+        await LoadCalendarAsync();
+
+        // Chờ tối đa 16 giây để Bot worker nhặt và đăng form rồi cập nhật tức thì trên UI
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        _pollCts = new CancellationTokenSource();
+        var token = _pollCts.Token;
+
+        try
+        {
+            for (var attempt = 0; attempt < 8 && !token.IsCancellationRequested; attempt++)
+            {
+                await Task.Delay(2000, token);
+                var updated = await ScheduleService.GetScheduleByIdAsync(Session.CurrentGuildId, scheduleId, token);
+                if (updated is null)
+                {
+                    break;
+                }
+
+                if (updated.CreatedWarEventId.HasValue)
+                {
+                    ShowToast($"Bot đã đăng form thành công (Event #{updated.CreatedWarEventId.Value})!", "success");
+                    await LoadCalendarAsync();
+                    if (_selectedItem?.ScheduledEventId == scheduleId)
+                    {
+                        await LoadSignupDetailAsync(updated.CreatedWarEventId.Value);
+                    }
+                    break;
+                }
+
+                if (!string.IsNullOrWhiteSpace(updated.LastFormError))
+                {
+                    ShowToast(updated.LastFormError, "error");
+                    await LoadCalendarAsync();
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Người dùng rời trang hoặc kích hoạt lại
+        }
+        finally
+        {
+            if (_triggeringScheduleId == scheduleId)
+            {
+                _triggeringScheduleId = null;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task ToggleCancelAsync(CalendarEventItem item)
+    {
+        if (!item.ScheduledEventId.HasValue)
+        {
+            return;
+        }
+
+        var result = await ScheduleService.ToggleCancelScheduleAsync(
+            Session.CurrentGuildId,
+            item.ScheduledEventId.Value,
+            !item.IsCancelled);
+
+        ShowToast(result.Message, result.Success ? "success" : "error");
+        await LoadCalendarAsync();
+    }
+
+    private async Task DeleteScheduleAsync(long scheduleId)
+    {
+        var result = await ScheduleService.DeleteScheduleAsync(Session.CurrentGuildId, scheduleId);
+        _confirmDeleteId = null;
+
+        if (result.Success)
+        {
+            CloseDetailDrawer();
+            ShowToast(result.Message, "success");
+            await LoadCalendarAsync();
+        }
+        else
+        {
+            ShowToast(result.Message, "error");
+        }
+    }
+
+    private List<CalendarEventItem> GetItemsForDay(DateOnly day) =>
+        _itemsByDay.TryGetValue(day, out var list) ? list : [];
+
+    private List<WarEventSignupRow> GetFilteredSignups()
+    {
+        if (_signupDetail is null)
+        {
+            return [];
+        }
+
+        IEnumerable<WarEventSignupRow> q = _signupDetail.Signups;
+
+        if (_signupStatusFilter == "active")
+        {
+            q = q.Where(s => s.Status is SignupStatus.Confirmed or SignupStatus.Late or SignupStatus.Bench);
+        }
+        else if (int.TryParse(_signupStatusFilter, out var stInt))
+        {
+            var status = (SignupStatus)stInt;
+            q = q.Where(s => s.Status == status);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_signupSearch))
+        {
+            var term = _signupSearch.Trim();
+            q = q.Where(s =>
+                s.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || (!string.IsNullOrWhiteSpace(s.IngameNickname) && s.IngameNickname.Contains(term, StringComparison.OrdinalIgnoreCase))
+                || (!string.IsNullOrWhiteSpace(s.ClassDisplayName) && s.ClassDisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        return q.ToList();
+    }
+
+    private bool TryComputeClosePreview(out DateTimeOffset previewVn)
+    {
+        previewVn = default;
+        if (!TryParseVnDateTime(_formEventDateStr, _formEventHour, _formEventMinute, out var scheduledLocal))
+        {
+            return false;
+        }
+
+        if (int.TryParse(_formClosePreset, out var mins))
+        {
+            previewVn = scheduledLocal.AddMinutes(-mins);
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryComputeAutoCreatePreview(out DateTimeOffset previewVn)
+    {
+        previewVn = default;
+        if (!TryParseVnDateTime(_formEventDateStr, _formEventHour, _formEventMinute, out var scheduledLocal))
+        {
+            return false;
+        }
+
+        if (int.TryParse(_formAutoPreset, out var hours))
+        {
+            previewVn = scheduledLocal.AddHours(-hours);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseVnDateTime(string dateStr, string? hourStr, string? minuteStr, out DateTimeOffset result)
+    {
+        result = default;
+        if (!DateOnly.TryParseExact(dateStr, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            return false;
+        }
+
+        if (!int.TryParse(hourStr, out var hour) || hour is < 0 or > 23)
+        {
+            return false;
+        }
+
+        if (!int.TryParse(minuteStr, out var minute) || minute is < 0 or > 59)
+        {
+            return false;
+        }
+
+        result = new DateTimeOffset(date.ToDateTime(new TimeOnly(hour, minute)), VietnamOffset);
+        return true;
+    }
+
+    private string ResolveChannelName(ulong channelId) =>
+        _channels.FirstOrDefault(c => c.ChannelId == channelId)?.Name ?? channelId.ToString();
+
+    private string ResolveRoleName(ulong roleId)
+    {
+        var role = _roles.FirstOrDefault(r => r.RoleId == roleId);
+        return role is not null ? FormatRoleLabel(role.Name) : $"Role #{roleId}";
+    }
+
+    private static string FormatRoleLabel(string name) =>
+        name.StartsWith('@') ? name : $"@{name}";
+
+    private void ShowToast(string message, string kind)
+    {
+        _toastMessage = message;
+        _toastKind = kind;
+    }
+
+    private string GetToastClasses() => _toastKind switch
+    {
+        "error" => "bg-rose-50 border-rose-200 text-rose-800",
+        "info" => "bg-indigo-50 border-indigo-200 text-indigo-800",
+        _ => "bg-emerald-50 border-emerald-200 text-emerald-800"
+    };
+
+    private static string GetEventTypeColor(EventType type) => type switch
+    {
+        EventType.GuildWar => "#e11d48",
+        EventType.Scrim => "#0284c7",
+        _ => "#d97706"
+    };
+
+    private static string GetEventTypeLabel(EventType type) => type switch
+    {
+        EventType.GuildWar => "Bang chiến",
+        EventType.Scrim => "Giao hữu",
+        _ => "Hoạt động khác"
+    };
+
+    private static string GetEventTypeBadgeClasses(EventType type) => type switch
+    {
+        EventType.GuildWar => "bg-rose-50 text-rose-700 border border-rose-200",
+        EventType.Scrim => "bg-sky-50 text-sky-700 border border-sky-200",
+        _ => "bg-amber-50 text-amber-700 border border-amber-200"
+    };
+
+    private static string GetEventChipClasses(CalendarEventItem item)
+    {
+        if (item.IsCancelled)
+        {
+            return "bg-slate-100/80 border-slate-200 text-slate-500 opacity-70";
+        }
+
+        return item.EventType switch
+        {
+            EventType.GuildWar => "bg-rose-50/75 hover:bg-rose-50 border-rose-200/90 text-rose-950",
+            EventType.Scrim => "bg-sky-50/75 hover:bg-sky-50 border-sky-200/90 text-sky-950",
+            _ => "bg-amber-50/75 hover:bg-amber-50 border-amber-200/90 text-amber-950"
+        };
+    }
+
+    private static string GetFormStatusShortLabel(ScheduleFormStatus status) => status switch
+    {
+        ScheduleFormStatus.FormCreated => "Đã tạo form",
+        ScheduleFormStatus.Closed => "Đã đóng",
+        ScheduleFormStatus.PendingAuto => "Chờ tự tạo",
+        ScheduleFormStatus.CreatingNow => "Đang tạo...",
+        ScheduleFormStatus.FormError => "Lỗi form",
+        ScheduleFormStatus.Cancelled => "Đã hủy",
+        _ => "Chưa tạo"
+    };
+
+    private static string GetFormStatusFullLabel(ScheduleFormStatus status) => status switch
+    {
+        ScheduleFormStatus.FormCreated => "Đã mở form Discord",
+        ScheduleFormStatus.Closed => "Form đã đóng",
+        ScheduleFormStatus.PendingAuto => "Chờ tự động mở form",
+        ScheduleFormStatus.CreatingNow => "Đang đăng form lên Discord...",
+        ScheduleFormStatus.FormError => "Lỗi đăng form",
+        ScheduleFormStatus.Cancelled => "Đã hủy lịch",
+        _ => "Chưa tạo form"
+    };
+
+    private static string GetFormStatusBadgeClasses(ScheduleFormStatus status) => status switch
+    {
+        ScheduleFormStatus.FormCreated => "bg-emerald-100 text-emerald-700",
+        ScheduleFormStatus.Closed => "bg-slate-200 text-slate-600",
+        ScheduleFormStatus.PendingAuto => "bg-indigo-100 text-indigo-700",
+        ScheduleFormStatus.CreatingNow => "bg-amber-100 text-amber-800 animate-pulse",
+        ScheduleFormStatus.FormError => "bg-rose-100 text-rose-700",
+        ScheduleFormStatus.Cancelled => "bg-slate-200 text-slate-500",
+        _ => "bg-slate-100 text-slate-500"
+    };
+
+    private static string GetSignupStatusShortLabel(SignupStatus status) => status switch
+    {
+        SignupStatus.Confirmed => "Tham gia",
+        SignupStatus.Late => "Đi trễ",
+        SignupStatus.Bench => "Dự bị",
+        SignupStatus.Absent => "Báo vắng",
+        SignupStatus.NotParticipating => "Không đi",
+        _ => status.ToString()
+    };
+
+    private static string GetSignupStatusBadgeClasses(SignupStatus status) => status switch
+    {
+        SignupStatus.Confirmed => "bg-emerald-100 text-emerald-700",
+        SignupStatus.Late => "bg-amber-100 text-amber-700",
+        SignupStatus.Bench => "bg-sky-100 text-sky-700",
+        SignupStatus.Absent => "bg-rose-100 text-rose-700",
+        SignupStatus.NotParticipating => "bg-slate-200 text-slate-600",
+        _ => "bg-slate-100 text-slate-600"
+    };
+
+    public void Dispose()
+    {
+        Session.StateChanged -= HandleSessionChanged;
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+    }
+}

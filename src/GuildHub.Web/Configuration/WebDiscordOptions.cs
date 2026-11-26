@@ -34,5 +34,29 @@ public sealed class WebDiscordOptions
     /// </summary>
     public string IconDirectory { get; set; } = "Icon";
 
+    /// <summary>
+    /// Danh sách Discord User ID có quyền SuperAdmin (phân tách bằng dấu phẩy), được phép truy cập toàn bộ server mà Bot đang tham gia.
+    /// </summary>
+    public string? SuperAdminUserIds { get; set; }
+
     public bool AutoMigrateDatabase { get; set; } = true;
+
+    public bool IsSuperAdmin(ulong userId)
+    {
+        if (string.IsNullOrWhiteSpace(SuperAdminUserIds))
+        {
+            return false;
+        }
+
+        var parts = SuperAdminUserIds.Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var part in parts)
+        {
+            if (ulong.TryParse(part, out var id) && id == userId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

@@ -40,6 +40,7 @@ services:
       DiscordWeb__BotToken: ${DISCORD_BOT_TOKEN:-}
       DiscordWeb__PublicBaseUrl: ${WEB_PUBLIC_BASE_URL:-http://localhost:5080}
       DiscordWeb__IconDirectory: /app/Icon
+      DiscordWeb__SuperAdminUserIds: ${DISCORD_WEB_SUPER_ADMIN_IDS:-347609569595359243}
       DiscordWeb__AutoMigrateDatabase: "true"
     volumes:
       - ./logs-web:/app/logs

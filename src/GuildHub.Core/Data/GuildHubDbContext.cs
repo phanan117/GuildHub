@@ -13,6 +13,7 @@ public sealed class GuildHubDbContext(DbContextOptions<GuildHubDbContext> option
     public DbSet<GuildConfig> GuildConfigs => Set<GuildConfig>();
     public DbSet<GuildMember> GuildMembers => Set<GuildMember>();
     public DbSet<GuildClassConfig> GuildClassConfigs => Set<GuildClassConfig>();
+    public DbSet<ScheduledEvent> ScheduledEvents => Set<ScheduledEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -159,6 +160,45 @@ public sealed class GuildHubDbContext(DbContextOptions<GuildHubDbContext> option
             entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
             entity.Property(e => e.IsCustom).HasColumnName("is_custom").HasDefaultValue(false);
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<ScheduledEvent>(entity =>
+        {
+            entity.ToTable("scheduled_events");
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.GuildId).HasColumnName("guild_id").HasConversion(ulongConverter);
+            entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasColumnName("description").HasMaxLength(1500);
+            entity.Property(e => e.EventType).HasColumnName("event_type").HasConversion<int>();
+            entity.Property(e => e.ScheduledTimeUtc).HasColumnName("scheduled_time_utc");
+            entity.Property(e => e.CloseTimeUtc).HasColumnName("close_time_utc");
+            entity.Property(e => e.AutoCreateForm).HasColumnName("auto_create_form").HasDefaultValue(false);
+            entity.Property(e => e.AutoCreateAtUtc).HasColumnName("auto_create_at_utc");
+            entity.Property(e => e.TriggerFormNow).HasColumnName("trigger_form_now").HasDefaultValue(false);
+            entity.Property(e => e.TargetChannelId).HasColumnName("target_channel_id").HasConversion(nullableUlongConverter);
+            entity.Property(e => e.TargetChannelName).HasColumnName("target_channel_name").HasMaxLength(100);
+            entity.Property(e => e.MentionRoleId).HasColumnName("mention_role_id").HasConversion(nullableUlongConverter);
+            entity.Property(e => e.MentionRoleName).HasColumnName("mention_role_name").HasMaxLength(100);
+            entity.Property(e => e.CreatedWarEventId).HasColumnName("created_war_event_id");
+            entity.Property(e => e.FormCreatedAtUtc).HasColumnName("form_created_at_utc");
+            entity.Property(e => e.LastFormError).HasColumnName("last_form_error").HasMaxLength(500);
+            entity.Property(e => e.LastFormAttemptAtUtc).HasColumnName("last_form_attempt_at_utc");
+            entity.Property(e => e.IsCancelled).HasColumnName("is_cancelled").HasDefaultValue(false);
+            entity.Property(e => e.CreatedByDiscordId).HasColumnName("created_by_discord_id").HasConversion(ulongConverter);
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+
+            entity.HasOne(e => e.CreatedWarEvent)
+                .WithMany()
+                .HasForeignKey(e => e.CreatedWarEventId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => new { e.GuildId, e.ScheduledTimeUtc });
+            entity.HasIndex(e => e.CreatedWarEventId);
+            entity.HasIndex(e => new { e.IsCancelled, e.CreatedWarEventId, e.AutoCreateForm, e.AutoCreateAtUtc });
+            entity.HasIndex(e => new { e.IsCancelled, e.CreatedWarEventId, e.TriggerFormNow });
         });
     }
 }

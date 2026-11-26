@@ -126,6 +126,8 @@ public static class DiscordOAuthEndpoints
                 return Results.Redirect("/login?error=profile_failed");
             }
 
+            var isSuperAdmin = cfg.IsSuperAdmin(userId);
+
             // 3. Lấy danh sách server của user và lọc các server user có quyền Administrator hoặc Manage Server
             using var guildsReq = new HttpRequestMessage(HttpMethod.Get, "https://discord.com/api/v10/users/@me/guilds");
             guildsReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.AccessToken);
@@ -141,6 +143,7 @@ public static class DiscordOAuthEndpoints
                 .ToList();
 
             // 4. Đối chiếu với danh sách server mà Bot đang tham gia
+            List<DiscordGuildDto>? botGuilds = null;
             HashSet<string>? botGuildIds = null;
             if (!string.IsNullOrWhiteSpace(cfg.BotToken))
             {
@@ -149,25 +152,42 @@ public static class DiscordOAuthEndpoints
                 using var botGuildsResp = await client.SendAsync(botGuildsReq, ct);
                 if (botGuildsResp.IsSuccessStatusCode)
                 {
-                    var botGuilds = await botGuildsResp.Content.ReadFromJsonAsync<List<DiscordGuildDto>>(cancellationToken: ct) ?? [];
+                    botGuilds = await botGuildsResp.Content.ReadFromJsonAsync<List<DiscordGuildDto>>(cancellationToken: ct) ?? [];
                     botGuildIds = botGuilds.Select(g => g.Id).ToHashSet(StringComparer.Ordinal);
                 }
             }
 
             var authorized = new List<AuthorizedGuildInfo>();
-            foreach (var g in adminGuilds)
+            if (isSuperAdmin && botGuilds is { Count: > 0 })
             {
-                if (botGuildIds is not null && !botGuildIds.Contains(g.Id))
+                foreach (var g in botGuilds)
                 {
-                    continue;
+                    if (ulong.TryParse(g.Id, out var gid))
+                    {
+                        var iconUrl = string.IsNullOrWhiteSpace(g.Icon)
+                            ? null
+                            : $"https://cdn.discordapp.com/icons/{g.Id}/{g.Icon}.png?size=128";
+                        authorized.Add(new AuthorizedGuildInfo(gid, g.Name, iconUrl));
+                    }
                 }
-
-                if (ulong.TryParse(g.Id, out var gid))
+            }
+            else
+            {
+                var sourceGuilds = isSuperAdmin ? userGuilds : adminGuilds;
+                foreach (var g in sourceGuilds)
                 {
-                    var iconUrl = string.IsNullOrWhiteSpace(g.Icon)
-                        ? null
-                        : $"https://cdn.discordapp.com/icons/{g.Id}/{g.Icon}.png?size=128";
-                    authorized.Add(new AuthorizedGuildInfo(gid, g.Name, iconUrl));
+                    if (botGuildIds is not null && !botGuildIds.Contains(g.Id))
+                    {
+                        continue;
+                    }
+
+                    if (ulong.TryParse(g.Id, out var gid))
+                    {
+                        var iconUrl = string.IsNullOrWhiteSpace(g.Icon)
+                            ? null
+                            : $"https://cdn.discordapp.com/icons/{g.Id}/{g.Icon}.png?size=128";
+                        authorized.Add(new AuthorizedGuildInfo(gid, g.Name, iconUrl));
+                    }
                 }
             }
 
@@ -243,8 +263,8 @@ public static class DiscordOAuthEndpoints
                 });
 
             logger.LogInformation(
-                "Admin {Username} ({UserId}) đăng nhập thành công với {Count} server được cấp quyền.",
-                user.Username, userId, authorized.Count);
+                "{Role} {Username} ({UserId}) đăng nhập thành công với {Count} server được cấp quyền.",
+                isSuperAdmin ? "SuperAdmin" : "Admin", user.Username, userId, authorized.Count);
 
             return Results.Redirect("/");
         });

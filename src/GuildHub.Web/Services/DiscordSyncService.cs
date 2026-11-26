@@ -14,6 +14,8 @@ namespace GuildHub.Web.Services;
 
 public sealed record DiscordRoleOption(ulong RoleId, string Name, int Color, int Position);
 
+public sealed record DiscordChannelOption(ulong ChannelId, string Name, string? CategoryName, int Position, bool IsAnnouncement);
+
 public sealed record DiscordMemberCandidate(
     ulong DiscordUserId,
     string Username,
@@ -39,7 +41,10 @@ public sealed class DiscordSyncService(
 {
     private static readonly ConcurrentDictionary<ulong, DateTimeOffset> LastSyncCooldowns = new();
     private static readonly TimeSpan SyncCooldown = TimeSpan.FromSeconds(15);
-    public async Task<List<DiscordRoleOption>> GetGuildRolesAsync(ulong guildId, CancellationToken ct = default)
+    public async Task<List<DiscordRoleOption>> GetGuildRolesAsync(
+        ulong guildId,
+        bool includeEveryone = false,
+        CancellationToken ct = default)
     {
         var token = options.Value.BotToken;
         if (string.IsNullOrWhiteSpace(token))
@@ -60,13 +65,59 @@ public sealed class DiscordSyncService(
 
         var roles = await resp.Content.ReadFromJsonAsync<List<DiscordRoleDto>>(cancellationToken: ct) ?? [];
         return roles
-            .Where(r => !r.Managed && r.Name != "@everyone")
-            .OrderByDescending(r => r.Position)
+            .Where(r => !r.Managed && (includeEveryone || r.Name != "@everyone"))
+            .OrderByDescending(r => r.Name == "@everyone" ? int.MaxValue : r.Position)
             .Select(r => ulong.TryParse(r.Id, out var id)
                 ? new DiscordRoleOption(id, r.Name, r.Color, r.Position)
                 : null)
             .Where(r => r is not null)
             .Cast<DiscordRoleOption>()
+            .ToList();
+    }
+
+    public async Task<List<DiscordChannelOption>> GetGuildTextChannelsAsync(ulong guildId, CancellationToken ct = default)
+    {
+        var token = options.Value.BotToken;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return [];
+        }
+
+        var client = httpClientFactory.CreateClient("DiscordApi");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"https://discord.com/api/v10/guilds/{guildId}/channels");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bot", token);
+
+        using var resp = await client.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Không thể lấy danh sách Kênh cho Guild {GuildId} (HTTP {Code}).", guildId, resp.StatusCode);
+            return [];
+        }
+
+        var channels = await resp.Content.ReadFromJsonAsync<List<DiscordChannelDto>>(cancellationToken: ct) ?? [];
+
+        // Type 4 = Category, Type 0 = Text, Type 5 = Announcement
+        var categoriesById = channels
+            .Where(c => c.Type == 4 && !string.IsNullOrWhiteSpace(c.Id))
+            .ToDictionary(c => c.Id, c => (c.Name, c.Position));
+
+        return channels
+            .Where(c => c.Type is 0 or 5 && ulong.TryParse(c.Id, out _))
+            .OrderBy(c => c.ParentId is not null && categoriesById.TryGetValue(c.ParentId, out var cat) ? cat.Position : -1)
+            .ThenBy(c => c.Position)
+            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(c =>
+            {
+                var catName = c.ParentId is not null && categoriesById.TryGetValue(c.ParentId, out var cat)
+                    ? cat.Name
+                    : null;
+                return new DiscordChannelOption(
+                    ChannelId: ulong.Parse(c.Id),
+                    Name: c.Name,
+                    CategoryName: catName,
+                    Position: c.Position,
+                    IsAnnouncement: c.Type == 5);
+            })
             .ToList();
     }
 
@@ -649,6 +700,24 @@ public sealed class DiscordSyncService(
 
         [JsonPropertyName("managed")]
         public bool Managed { get; set; }
+    }
+
+    private sealed class DiscordChannelDto
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("type")]
+        public int Type { get; set; }
+
+        [JsonPropertyName("position")]
+        public int Position { get; set; }
+
+        [JsonPropertyName("parent_id")]
+        public string? ParentId { get; set; }
     }
 
     private sealed class DiscordGuildMemberDto

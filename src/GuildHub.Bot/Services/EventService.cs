@@ -25,9 +25,10 @@ public sealed class EventService(IDbContextFactory<GuildHubDbContext> dbFactory)
         ulong leaderDiscordId,
         string title,
         DateTimeOffset onlineTimeUtc,
-        DateTimeOffset closeTimeUtc,
+        DateTimeOffset? closeTimeUtc,
         ulong? mentionRoleId,
         string? description,
+        EventType eventType = EventType.GuildWar,
         CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -37,11 +38,11 @@ public sealed class EventService(IDbContextFactory<GuildHubDbContext> dbFactory)
             GuildId = guildId,
             ChannelId = channelId,
             LeaderDiscordId = leaderDiscordId,
-            EventType = EventType.GuildWar,
+            EventType = eventType,
             Title = title.Trim(),
             Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
             EventTimeUtc = onlineTimeUtc.ToUniversalTime(),
-            CloseTimeUtc = closeTimeUtc.ToUniversalTime(),
+            CloseTimeUtc = closeTimeUtc?.ToUniversalTime(),
             MentionRoleId = mentionRoleId,
             IsClosed = false,
             NextSignupOrder = 1,
@@ -51,6 +52,19 @@ public sealed class EventService(IDbContextFactory<GuildHubDbContext> dbFactory)
         db.WarEvents.Add(entity);
         await db.SaveChangesAsync(ct);
         return entity;
+    }
+
+    public async Task DeleteEventIfNoMessageAsync(long eventId, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var ev = await db.WarEvents.FirstOrDefaultAsync(e => e.Id == eventId && e.MessageId == 0, ct);
+        if (ev is null)
+        {
+            return;
+        }
+
+        db.WarEvents.Remove(ev);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task AttachMessageIdAsync(long eventId, ulong messageId, CancellationToken ct = default)

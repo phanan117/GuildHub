@@ -317,6 +317,124 @@ namespace GuildHub.Core.Data.Migrations
                     b.ToTable("guild_members", (string)null);
                 });
 
+            modelBuilder.Entity("GuildHub.Core.Domain.Entities.ScheduledEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset?>("AutoCreateAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("auto_create_at_utc");
+
+                    b.Property<bool>("AutoCreateForm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("auto_create_form");
+
+                    b.Property<DateTimeOffset?>("CloseTimeUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("close_time_utc");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<long>("CreatedByDiscordId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_by_discord_id");
+
+                    b.Property<long?>("CreatedWarEventId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_war_event_id");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1500)
+                        .HasColumnType("character varying(1500)")
+                        .HasColumnName("description");
+
+                    b.Property<int>("EventType")
+                        .HasColumnType("integer")
+                        .HasColumnName("event_type");
+
+                    b.Property<DateTimeOffset?>("FormCreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("form_created_at_utc");
+
+                    b.Property<long>("GuildId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("guild_id");
+
+                    b.Property<bool>("IsCancelled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_cancelled");
+
+                    b.Property<DateTimeOffset?>("LastFormAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_form_attempt_at_utc");
+
+                    b.Property<string>("LastFormError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("last_form_error");
+
+                    b.Property<long?>("MentionRoleId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("mention_role_id");
+
+                    b.Property<string>("MentionRoleName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("mention_role_name");
+
+                    b.Property<DateTimeOffset>("ScheduledTimeUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scheduled_time_utc");
+
+                    b.Property<long?>("TargetChannelId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("target_channel_id");
+
+                    b.Property<string>("TargetChannelName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("target_channel_name");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.Property<bool>("TriggerFormNow")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("trigger_form_now");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedWarEventId");
+
+                    b.HasIndex("GuildId", "ScheduledTimeUtc");
+
+                    b.HasIndex("IsCancelled", "CreatedWarEventId", "TriggerFormNow");
+
+                    b.HasIndex("IsCancelled", "CreatedWarEventId", "AutoCreateForm", "AutoCreateAtUtc");
+
+                    b.ToTable("scheduled_events", (string)null);
+                });
+
             modelBuilder.Entity("GuildHub.Core.Domain.Entities.UiEmoji", b =>
                 {
                     b.Property<int>("UiIcon")
@@ -444,6 +562,16 @@ namespace GuildHub.Core.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("WarEvent");
+                });
+
+            modelBuilder.Entity("GuildHub.Core.Domain.Entities.ScheduledEvent", b =>
+                {
+                    b.HasOne("GuildHub.Core.Domain.Entities.WarEvent", "CreatedWarEvent")
+                        .WithMany()
+                        .HasForeignKey("CreatedWarEventId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("CreatedWarEvent");
                 });
 
             modelBuilder.Entity("GuildHub.Core.Domain.Entities.WarEvent", b =>
