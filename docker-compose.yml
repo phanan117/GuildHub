@@ -1,0 +1,89 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: guildhub-bot
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      DOTNET_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: ${BOT_CONNECTION_STRING:-Host=host.docker.internal;Port=5432;Database=guildhub;Username=postgres;Password=postgres}
+      DiscordBot__Token: ${DISCORD_BOT_TOKEN}
+      DiscordBot__DevGuildId: ${DISCORD_DEV_GUILD_ID:-}
+      DiscordBot__IconDirectory: /app/Icon
+      DiscordBot__AutoMigrateDatabase: "true"
+      DiscordBot__AutoSyncIcons: "true"
+    volumes:
+      - ./logs:/app/logs
+      - ./Icon:/app/Icon:ro
+
+  # Web Quản trị Bang hội (Blazor + Tailwind CSS)
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: guildhub-web
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${WEB_PORT:-5080}:8080"
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: ${BOT_CONNECTION_STRING:-Host=host.docker.internal;Port=5432;Database=guildhub;Username=postgres;Password=postgres}
+      DiscordWeb__ClientId: ${DISCORD_WEB_CLIENT_ID:-}
+      DiscordWeb__ClientSecret: ${DISCORD_WEB_CLIENT_SECRET:-}
+      DiscordWeb__BotToken: ${DISCORD_BOT_TOKEN:-}
+      DiscordWeb__PublicBaseUrl: ${WEB_PUBLIC_BASE_URL:-http://localhost:5080}
+      DiscordWeb__IconDirectory: /app/Icon
+      DiscordWeb__AutoMigrateDatabase: "true"
+    volumes:
+      - ./logs-web:/app/logs
+      - ./keys-web:/app/keys
+      - ./Icon:/app/Icon
+
+  # Bot thứ 2 dùng để demo ở server khác (chạy song song bằng: docker compose --profile demo up -d --build bot-demo)
+  bot-demo:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: guildhub-bot-demo
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      DOTNET_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: ${BOT_DEMO_CONNECTION_STRING:-Host=host.docker.internal;Port=5432;Database=guildhub_demo;Username=postgres;Password=postgres}
+      DiscordBot__Token: ${DISCORD_DEMO_BOT_TOKEN}
+      DiscordBot__DevGuildId: ${DISCORD_DEMO_DEV_GUILD_ID:-}
+      DiscordBot__IconDirectory: /app/Icon
+      DiscordBot__AutoMigrateDatabase: "true"
+      DiscordBot__AutoSyncIcons: "true"
+    volumes:
+      - ./logs-demo:/app/logs
+      - ./Icon:/app/Icon:ro
+
+  # Tùy chọn: chỉ chạy khi cần PostgreSQL trong Docker (docker compose --profile with-db up -d)
+  postgres:
+    profiles: ["with-db"]
+    image: postgres:16-alpine
+    container_name: guildhub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-guildhub}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - guildhub_pgdata:/var/lib/postgresql/data
+
+volumes:
+  guildhub_pgdata:

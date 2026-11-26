@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GuildHub.Bot/GuildHub.Bot.csproj" />
+    <Project Path="src/GuildHub.Core/GuildHub.Core.csproj" />
+    <Project Path="src/GuildHub.Web/GuildHub.Web.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,235 @@
+@using System.Globalization
+@using System.Text
+
+<div class="relative @WrapperClass">
+    <!-- Trigger Button (kiểu Select2 hiện đại với Tailwind) -->
+    <button type="button"
+            disabled="@Disabled"
+            @onclick="ToggleOpen"
+            class="@TriggerClasses">
+        <div class="flex items-center gap-2 min-w-0 flex-1 text-left">
+            @if (SelectedOption is not null)
+            {
+                @if (!string.IsNullOrWhiteSpace(SelectedOption.IconUrl))
+                {
+                    <img src="@SelectedOption.IconUrl" alt="" class="@(SelectedOption.RoundIcon ? "w-5 h-5 rounded-full object-cover" : "w-4 h-4 object-contain") flex-shrink-0" />
+                }
+                else if (!string.IsNullOrWhiteSpace(SelectedOption.ColorDot))
+                {
+                    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:@SelectedOption.ColorDot"></span>
+                }
+
+                <span class="truncate font-medium text-slate-800">@SelectedOption.Label</span>
+
+                @if (!string.IsNullOrWhiteSpace(SelectedOption.SubLabel))
+                {
+                    <span class="truncate text-xs text-slate-400">@SelectedOption.SubLabel</span>
+                }
+            }
+            else
+            {
+                <span class="truncate text-slate-400">@Placeholder</span>
+            }
+        </div>
+
+        <div class="flex items-center gap-1 flex-shrink-0 ml-1">
+            @if (AllowClear && !string.IsNullOrEmpty(Value) && !Disabled)
+            {
+                <span @onclick="ClearAsync"
+                      @onclick:stopPropagation="true"
+                      title="Xóa lựa chọn"
+                      class="w-4 h-4 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-700 inline-flex items-center justify-center text-[10px] font-bold transition">
+                    ✕
+                </span>
+            }
+            <svg class="w-4 h-4 text-slate-400 transition-transform duration-150 @(_isOpen ? "rotate-180 text-brand-600" : "")"
+                 fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+            </svg>
+        </div>
+    </button>
+
+    @if (_isOpen)
+    {
+        <!-- Backdrop đóng dropdown khi click ra ngoài -->
+        <div class="fixed inset-0 z-40" @onclick="Close"></div>
+
+        <!-- Dropdown Panel -->
+        <div class="absolute z-50 mt-1.5 @(AlignRight ? "right-0" : "left-0") w-full @(MinDropdownWidthClass) bg-white border border-slate-200/95 rounded-2xl shadow-xl overflow-hidden">
+            @if (ShowSearch)
+            {
+                <div class="p-2 border-b border-slate-100 bg-slate-50/70">
+                    <div class="relative">
+                        <svg class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                             fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <circle cx="11" cy="11" r="7" />
+                            <path stroke-linecap="round" d="M20 20l-3.5-3.5" />
+                        </svg>
+                        <input type="text"
+                               value="@_query"
+                               @oninput="e => _query = e.Value?.ToString() ?? string.Empty"
+                               placeholder="@SearchPlaceholder"
+                               autofocus
+                               class="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-7 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
+                        @if (!string.IsNullOrEmpty(_query))
+                        {
+                            <button type="button"
+                                    @onclick="() => _query = string.Empty"
+                                    class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[10px] font-bold cursor-pointer">
+                                ✕
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+
+            <div class="max-h-60 overflow-y-auto py-1">
+                @if (FilteredOptions.Count == 0)
+                {
+                    <div class="px-3.5 py-4 text-center text-xs text-slate-400">
+                        @EmptyText
+                    </div>
+                }
+                else
+                {
+                    @foreach (var opt in FilteredOptions)
+                    {
+                        var isSelected = string.Equals(opt.Value, Value, StringComparison.Ordinal);
+                        <button type="button"
+                                @onclick="() => SelectAsync(opt.Value)"
+                                class="w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition cursor-pointer @(isSelected ? "bg-brand-50/80 text-brand-800" : "hover:bg-sky-50/70 text-slate-700")">
+                            <div class="flex items-center gap-2 min-w-0 flex-1">
+                                @if (!string.IsNullOrWhiteSpace(opt.IconUrl))
+                                {
+                                    <img src="@opt.IconUrl" alt="" class="@(opt.RoundIcon ? "w-6 h-6 rounded-full object-cover ring-1 ring-slate-200" : "w-4 h-4 object-contain") flex-shrink-0" />
+                                }
+                                else if (!string.IsNullOrWhiteSpace(opt.ColorDot))
+                                {
+                                    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:@opt.ColorDot"></span>
+                                }
+
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-xs sm:text-sm truncate @(isSelected ? "font-bold" : "font-medium")">@opt.Label</div>
+                                    @if (!string.IsNullOrWhiteSpace(opt.SubLabel))
+                                    {
+                                        <div class="text-[11px] text-slate-400 truncate">@opt.SubLabel</div>
+                                    }
+                                </div>
+                            </div>
+
+                            @if (isSelected)
+                            {
+                                <svg class="w-4 h-4 text-brand-600 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                            }
+                        </button>
+                    }
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    public sealed record SelectOption(
+        string Value,
+        string Label,
+        string? SubLabel = null,
+        string? IconUrl = null,
+        string? ColorDot = null,
+        bool RoundIcon = false);
+
+    [Parameter] public IReadOnlyList<SelectOption> Options { get; set; } = [];
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "-- Chọn --";
+    [Parameter] public string SearchPlaceholder { get; set; } = "Tìm kiếm...";
+    [Parameter] public string EmptyText { get; set; } = "Không tìm thấy kết quả phù hợp";
+    [Parameter] public bool ShowSearch { get; set; } = true;
+    [Parameter] public bool AllowClear { get; set; }
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool AlignRight { get; set; }
+    [Parameter] public string WrapperClass { get; set; } = "w-full";
+    [Parameter] public string MinDropdownWidthClass { get; set; } = "min-w-[200px]";
+
+    private bool _isOpen;
+    private string _query = string.Empty;
+
+    private SelectOption? SelectedOption =>
+        Options.FirstOrDefault(o => string.Equals(o.Value, Value, StringComparison.Ordinal));
+
+    private IReadOnlyList<SelectOption> FilteredOptions
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_query))
+            {
+                return Options;
+            }
+
+            var needle = NormalizeForSearch(_query);
+            return Options.Where(o =>
+                NormalizeForSearch(o.Label).Contains(needle, StringComparison.Ordinal) ||
+                (!string.IsNullOrWhiteSpace(o.SubLabel) && NormalizeForSearch(o.SubLabel).Contains(needle, StringComparison.Ordinal)))
+                .ToList();
+        }
+    }
+
+    private string TriggerClasses =>
+        (Compact
+            ? "w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl px-2.5 py-1.5 text-xs flex items-center justify-between gap-1.5"
+            : "w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl px-3.5 py-2 text-sm flex items-center justify-between gap-2")
+        + (_isOpen ? " ring-2 ring-brand-500/25 border-brand-500" : "")
+        + (Disabled ? " opacity-50 cursor-not-allowed bg-slate-50" : " cursor-pointer transition");
+
+    private void ToggleOpen()
+    {
+        if (Disabled) return;
+        _isOpen = !_isOpen;
+        if (_isOpen) _query = string.Empty;
+    }
+
+    private void Close() => _isOpen = false;
+
+    private async Task SelectAsync(string val)
+    {
+        _isOpen = false;
+        _query = string.Empty;
+        if (!string.Equals(Value, val, StringComparison.Ordinal))
+        {
+            Value = val;
+            await ValueChanged.InvokeAsync(val);
+        }
+    }
+
+    private async Task ClearAsync()
+    {
+        _isOpen = false;
+        _query = string.Empty;
+        Value = string.Empty;
+        await ValueChanged.InvokeAsync(string.Empty);
+    }
+
+    private static string NormalizeForSearch(string input)
+    {
+        var decomposed = input.Trim().Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(decomposed.Length);
+        foreach (var ch in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            sb.Append(ch switch
+            {
+                'đ' or 'Đ' => 'd',
+                _ => char.ToLowerInvariant(ch)
+            });
+        }
+
+        return sb.ToString();
+    }
+}

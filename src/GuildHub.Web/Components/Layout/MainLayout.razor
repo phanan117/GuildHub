@@ -1,0 +1,311 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject AuthenticationStateProvider AuthStateProvider
+@inject GuildSessionState Session
+@inject DiscordSyncService SyncService
+@inject MemberManagementService MemberService
+@inject NavigationManager Navigation
+
+<div class="min-h-screen bg-canvas flex">
+    <!-- Left Sidebar (Icon Rail giống Ảnh 1) -->
+    <aside class="w-20 lg:w-24 bg-white border-r border-slate-200/90 flex flex-col items-center py-5 fixed inset-y-0 left-0 z-30 shadow-soft">
+        <!-- Guild Logo -->
+        <a href="/" class="flex flex-col items-center gap-1.5 mb-7 px-2 group text-center">
+            @if (!string.IsNullOrWhiteSpace(Session.CurrentGuild?.IconUrl))
+            {
+                <img src="@Session.CurrentGuild!.IconUrl"
+                     alt="@Session.CurrentGuild.Name"
+                     class="w-11 h-11 rounded-2xl object-cover shadow-sm ring-2 ring-slate-100 group-hover:ring-brand-200 transition" />
+            }
+            else
+            {
+                <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-brand-600 to-indigo-900 text-white font-extrabold text-lg flex items-center justify-center shadow-sm">
+                    GH
+                </div>
+            }
+            <span class="text-[10px] font-extrabold text-slate-700 tracking-wide leading-tight line-clamp-2 max-w-[74px]">
+                @(Session.CurrentGuild?.Name ?? "GuildHub")
+            </span>
+        </a>
+
+        <!-- Navigation Icons -->
+        <nav class="flex-1 flex flex-col items-center gap-2 w-full px-2.5">
+            <NavLink href="/" Match="NavLinkMatch.All" title="Tổng quan bang hội"
+                     class="w-12 h-12 rounded-2xl flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition"
+                     ActiveClass="!bg-brand-50 !text-brand-600 ring-1 ring-brand-200 shadow-sm">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+                    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                    <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                </svg>
+            </NavLink>
+
+            <NavLink href="/analytics" title="Phân tích bang hội & Chuyên cần (GĐ 2)"
+                     class="w-12 h-12 rounded-2xl flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition"
+                     ActiveClass="!bg-brand-50 !text-brand-600 ring-1 ring-brand-200 shadow-sm">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 19h16M7 16V9m5 7V5m5 11v-4" />
+                </svg>
+            </NavLink>
+
+            <NavLink href="/schedule" title="Lịch hoạt động — Schedule (GĐ 2)"
+                     class="w-12 h-12 rounded-2xl flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition"
+                     ActiveClass="!bg-brand-50 !text-brand-600 ring-1 ring-brand-200 shadow-sm">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+                    <rect x="3" y="4" width="18" height="17" rx="2" />
+                    <path stroke-linecap="round" d="M8 2v4M16 2v4M3 10h18" />
+                </svg>
+            </NavLink>
+
+            <NavLink href="/members" title="Quản lý thành viên"
+                     class="w-12 h-12 rounded-2xl flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition"
+                     ActiveClass="!bg-brand-50 !text-brand-600 ring-1 ring-brand-200 shadow-sm">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                    <circle cx="9.5" cy="7" r="3.5" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M22 20v-2a4 4 0 0 0-3-3.87M16.5 3.63a3.5 3.5 0 0 1 0 6.74" />
+                </svg>
+            </NavLink>
+
+            <NavLink href="/settings" title="Cấu hình Server & Role Discord"
+                     class="w-12 h-12 rounded-2xl flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition"
+                     ActiveClass="!bg-brand-50 !text-brand-600 ring-1 ring-brand-200 shadow-sm">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3l7 4v5c0 4.5-3 8.2-7 9-4-.8-7-4.5-7-9V7l7-4z" />
+                </svg>
+            </NavLink>
+
+            <NavLink href="/lineup" title="Đội hình bang chiến 60vs60 (GĐ 3)"
+                     class="w-12 h-12 rounded-2xl flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition"
+                     ActiveClass="!bg-brand-50 !text-brand-600 ring-1 ring-brand-200 shadow-sm">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.5 17.5L3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2M14.5 6.5L18 3h3v3l-3.5 3.5M5 14l4 4M7 17l-3 3" />
+                </svg>
+            </NavLink>
+        </nav>
+
+        <!-- Admin Avatar -->
+        @if (Session.User is not null)
+        {
+            <div class="pt-4 border-t border-slate-100 flex flex-col items-center gap-1" title="@Session.User.DisplayName (@Session.User.Username)">
+                @if (!string.IsNullOrWhiteSpace(Session.User.AvatarUrl))
+                {
+                    <img src="@Session.User.AvatarUrl" alt="Avatar" class="w-9 h-9 rounded-full object-cover ring-2 ring-brand-100" />
+                }
+                else
+                {
+                    <div class="w-9 h-9 rounded-full bg-brand-100 text-brand-700 font-bold text-xs flex items-center justify-center">
+                        @Session.User.DisplayName[0]
+                    </div>
+                }
+            </div>
+        }
+    </aside>
+
+    <!-- Main Content Shell -->
+    <div class="flex-1 ml-20 lg:ml-24 min-w-0 flex flex-col">
+        <!-- Top Header Bar -->
+        <header class="sticky top-0 z-20 bg-canvas/90 backdrop-blur-md border-b border-slate-200/70 px-5 lg:px-8 py-4">
+            <div class="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-4">
+                <div class="min-w-0">
+                    <div class="text-xs font-medium text-slate-500">Không gian quản trị</div>
+                    <div class="flex items-center gap-3 mt-0.5 flex-wrap">
+                        <h1 class="text-xl lg:text-2xl font-extrabold text-slate-900 tracking-tight">
+                            Chào mừng, @(Session.User?.DisplayName ?? "Admin")
+                        </h1>
+
+                        @if (Session.User is not null && Session.User.AuthorizedGuilds.Count > 1)
+                        {
+                            <SearchSelect Options="@GuildOptions"
+                                          Value="@Session.CurrentGuildId.ToString()"
+                                          ValueChanged="HandleGuildSwitch"
+                                          Compact="true"
+                                          WrapperClass="w-48"
+                                          SearchPlaceholder="Tìm server..." />
+                        }
+                        else if (Session.CurrentGuild is not null)
+                        {
+                            <span class="text-xs font-semibold text-slate-500 bg-white/80 border border-slate-200/80 px-2.5 py-1 rounded-lg">
+                                @Session.CurrentGuild.Name
+                            </span>
+                        }
+                    </div>
+                </div>
+
+                <!-- Right Controls: Quick Search + Sync Discord + Logout -->
+                <div class="flex flex-col items-end gap-1">
+                    <div class="flex items-center gap-2.5 flex-wrap">
+                        <div class="relative">
+                            <input type="text"
+                                   value="@Session.QuickSearchQuery"
+                                   @oninput="HandleQuickSearchInput"
+                                   @onkeydown="HandleQuickSearchKeyDown"
+                                   placeholder="Tìm thành viên..."
+                                   class="w-48 sm:w-56 bg-white border border-slate-200 rounded-xl pl-3.5 pr-9 py-2 text-sm text-slate-700 placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500 transition" />
+                            <svg class="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <circle cx="11" cy="11" r="7" />
+                                <path stroke-linecap="round" d="M20 20l-3.5-3.5" />
+                            </svg>
+                        </div>
+
+                        <button type="button"
+                                @onclick="HandleSyncDiscordAsync"
+                                disabled="@(_isSyncing || Session.CurrentGuildId == 0)"
+                                class="inline-flex items-center gap-2 bg-slatebtn hover:bg-slatebtn-hover disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm transition cursor-pointer">
+                            @if (_isSyncing)
+                            {
+                                <span class="w-4 h-4 border-2 border-white/80 border-t-transparent rounded-full animate-spin"></span>
+                                <span>Đang đồng bộ...</span>
+                            }
+                            else
+                            {
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M20 20v-5h-5M20.49 9A9 9 0 0 0 5.64 5.64L4 9m16 6l-1.64 3.36A9 9 0 0 1 3.51 15" />
+                                </svg>
+                                <span>Sync Discord</span>
+                            }
+                        </button>
+
+                        <a href="/auth/logout"
+                           class="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-sm font-semibold px-3.5 py-2 rounded-xl shadow-sm transition">
+                            <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />
+                            </svg>
+                            <span>Đăng xuất</span>
+                        </a>
+                    </div>
+
+                    @if (_lastSyncedAtUtc.HasValue)
+                    {
+                        var vn = _lastSyncedAtUtc.Value.ToOffset(TimeSpan.FromHours(7));
+                        <div class="text-[11px] text-slate-500">
+                            Đồng bộ thành công · @_lastSyncedCount thành viên · @vn.ToString("HH:mm dd/MM/yy")
+                        </div>
+                    }
+                </div>
+            </div>
+        </header>
+
+        <!-- Toast / Sync Banner -->
+        @if (!string.IsNullOrWhiteSpace(_toastMessage))
+        {
+            <div class="px-5 lg:px-8 pt-4">
+                <div class="max-w-[1440px] mx-auto">
+                    <div class="@(_toastIsWarning ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-emerald-50 border-emerald-200 text-emerald-900") border rounded-2xl px-4 py-3 text-sm flex items-center justify-between gap-3 shadow-sm">
+                        <div class="flex items-center gap-2.5">
+                            <span class="font-bold">@(_toastIsWarning ? "⚠️" : "✅")</span>
+                            <span>@_toastMessage</span>
+                        </div>
+                        <button type="button" @onclick="() => _toastMessage = null" class="text-xs font-bold opacity-60 hover:opacity-100 px-1.5">✕</button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Page Body -->
+        <main class="flex-1 px-5 lg:px-8 py-6">
+            <div class="max-w-[1440px] mx-auto">
+                @Body
+            </div>
+        </main>
+    </div>
+</div>
+
+@code {
+    private bool _isSyncing;
+    private DateTimeOffset? _lastSyncedAtUtc;
+    private int _lastSyncedCount;
+    private string? _toastMessage;
+    private bool _toastIsWarning;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.StateChanged += HandleSessionChanged;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        Session.InitializeFromPrincipal(authState.User);
+        await LoadSyncMetaAsync();
+    }
+
+    private async Task LoadSyncMetaAsync()
+    {
+        if (Session.CurrentGuildId == 0) return;
+        var cfg = await MemberService.GetGuildConfigAsync(Session.CurrentGuildId);
+        _lastSyncedAtUtc = cfg?.LastSyncedAtUtc;
+        _lastSyncedCount = cfg?.LastSyncedMemberCount ?? 0;
+    }
+
+    private async void HandleSessionChanged()
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadSyncMetaAsync();
+            StateHasChanged();
+        });
+    }
+
+    private IReadOnlyList<SearchSelect.SelectOption> GuildOptions =>
+        Session.User?.AuthorizedGuilds
+            .Select(g => new SearchSelect.SelectOption(g.GuildId.ToString(), g.Name, IconUrl: g.IconUrl, RoundIcon: true))
+            .ToList() ?? [];
+
+    private void HandleGuildSwitch(string? value)
+    {
+        if (ulong.TryParse(value, out var gid))
+        {
+            Session.SelectGuild(gid);
+        }
+    }
+
+    private void HandleQuickSearchInput(ChangeEventArgs e)
+    {
+        Session.QuickSearchQuery = e.Value?.ToString() ?? string.Empty;
+        Session.NotifyStateChanged();
+    }
+
+    private void HandleQuickSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !Navigation.Uri.Contains("/members", StringComparison.OrdinalIgnoreCase))
+        {
+            Navigation.NavigateTo("/members");
+        }
+    }
+
+    private async Task HandleSyncDiscordAsync()
+    {
+        if (Session.CurrentGuildId == 0 || _isSyncing) return;
+
+        _isSyncing = true;
+        _toastMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await SyncService.SyncGuildMembersAsync(Session.CurrentGuildId);
+            if (result.Success)
+            {
+                _lastSyncedAtUtc = result.SyncedAtUtc;
+                _lastSyncedCount = result.SyncedCount;
+                Session.NotifyStateChanged();
+            }
+
+            _toastMessage = result.Message;
+            _toastIsWarning = !result.Success || result.UsedSignupFallback;
+        }
+        catch (Exception ex)
+        {
+            _toastMessage = $"Lỗi khi đồng bộ Discord: {ex.Message}";
+            _toastIsWarning = true;
+        }
+        finally
+        {
+            _isSyncing = false;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        Session.StateChanged -= HandleSessionChanged;
+    }
+}

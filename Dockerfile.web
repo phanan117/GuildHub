@@ -1,0 +1,27 @@
+# Stage 1: Build & Publish Web (Blazor Server + Tailwind CSS)
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+COPY src/GuildHub.Core/GuildHub.Core.csproj src/GuildHub.Core/
+COPY src/GuildHub.Web/GuildHub.Web.csproj src/GuildHub.Web/
+RUN dotnet restore src/GuildHub.Web/GuildHub.Web.csproj
+
+COPY src/GuildHub.Core/ src/GuildHub.Core/
+COPY src/GuildHub.Web/ src/GuildHub.Web/
+COPY Icon/ Icon/
+
+RUN dotnet publish src/GuildHub.Web/GuildHub.Web.csproj -c Release -o /app/publish --no-restore
+
+# Stage 2: ASP.NET Core Runtime
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+WORKDIR /app
+
+ENV TZ=Asia/Ho_Chi_Minh \
+    ASPNETCORE_ENVIRONMENT=Production \
+    ASPNETCORE_URLS=http://+:8080
+
+EXPOSE 8080
+
+COPY --from=build /app/publish .
+
+ENTRYPOINT ["dotnet", "GuildHub.Web.dll"]

@@ -1,0 +1,626 @@
+@page "/settings"
+@attribute [Authorize]
+@implements IDisposable
+@inject GuildSessionState Session
+@inject DiscordSyncService SyncService
+@inject MemberManagementService MemberService
+
+<PageTitle>Cấu hình Server & Hệ phái — GuildHub</PageTitle>
+
+<div class="w-full space-y-5">
+    <!-- Card 1: Cấu hình Role thành viên bang (gọn 1 hàng full-width) -->
+    <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card p-6">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <div class="text-xs font-medium text-slate-500">Cấu hình bang hội</div>
+                <h2 class="text-lg font-extrabold text-slate-900 mt-0.5">Role thành viên Discord</h2>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2.5 flex-1 justify-end min-w-[280px]">
+                @if (_loadingRoles)
+                {
+                    <span class="text-sm text-slate-400">Đang tải danh sách Role...</span>
+                }
+                else
+                {
+                    <SearchSelect Options="@MemberRoleOptions"
+                                  @bind-Value="_selectedRoleIdStr"
+                                  Placeholder="-- Tất cả thành viên server --"
+                                  SearchPlaceholder="Tìm Role Discord..."
+                                  AllowClear="true"
+                                  WrapperClass="w-full sm:w-80" />
+                }
+
+                <button type="button"
+                        @onclick="SaveMemberRoleConfigAsync"
+                        disabled="@_savingRole"
+                        class="px-5 py-2.5 rounded-xl bg-slatebtn hover:bg-slatebtn-hover disabled:opacity-60 text-white text-sm font-semibold shadow-sm transition cursor-pointer whitespace-nowrap">
+                    @(_savingRole ? "Đang lưu..." : "Lưu Role bang")
+                </button>
+
+                <button type="button"
+                        @onclick="LoadRolesAsync"
+                        class="px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-sm font-semibold transition cursor-pointer whitespace-nowrap">
+                    Tải lại Role
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_roleStatusMsg))
+        {
+            <div class="mt-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl px-4 py-2.5 text-xs font-medium flex items-center justify-between">
+                <span>✅ @_roleStatusMsg</span>
+                <button type="button" @onclick="() => _roleStatusMsg = null" class="font-bold opacity-60 hover:opacity-100 px-1">✕</button>
+            </div>
+        }
+    </div>
+
+    <!-- Card 2: Cấu hình Hệ phái (Full-width, gọn sạch) -->
+    <div class="bg-white rounded-2xl border border-slate-200/90 shadow-card">
+        <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <div class="text-xs font-medium text-slate-500">Quản lý môn phái</div>
+                <h2 class="text-lg font-extrabold text-slate-900 mt-0.5 flex items-center gap-2">
+                    <span>Cấu hình Hệ phái</span>
+                    <span class="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full">@_classEditors.Count hệ phái</span>
+                </h2>
+            </div>
+
+            <div class="flex items-center gap-2.5">
+                <button type="button"
+                        @onclick="OpenAddClassModal"
+                        class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold shadow-sm transition cursor-pointer whitespace-nowrap">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" d="M12 5v14M5 12h14" />
+                    </svg>
+                    <span>Thêm hệ phái mới</span>
+                </button>
+
+                <button type="button"
+                        @onclick="SaveClassConfigsAsync"
+                        disabled="@_savingClasses"
+                        class="px-5 py-2.5 rounded-xl bg-slatebtn hover:bg-slatebtn-hover disabled:opacity-60 text-white text-sm font-semibold shadow-sm transition cursor-pointer whitespace-nowrap">
+                    @(_savingClasses ? "Đang lưu..." : "Lưu tất cả")
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_classStatusMsg))
+        {
+            <div class="px-6 pt-4">
+                <div class="@(_classStatusError ? "bg-rose-50 border-rose-200 text-rose-800" : "bg-emerald-50 border-emerald-200 text-emerald-800") border rounded-xl px-4 py-2.5 text-xs font-medium flex items-center justify-between gap-3">
+                    <span>@(_classStatusError ? "⚠️ " : "✅ ")@_classStatusMsg</span>
+                    <button type="button" @onclick="() => _classStatusMsg = null" class="font-bold opacity-60 hover:opacity-100 px-1">✕</button>
+                </div>
+            </div>
+        }
+
+        <div class="overflow-x-visible">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="bg-slate-50/80 border-b border-slate-200 text-xs font-bold text-slate-600">
+                        <th class="py-3.5 px-6 w-44">Icon hệ phái</th>
+                        <th class="py-3.5 px-4 w-40">Màu sắc</th>
+                        <th class="py-3.5 px-4 w-60">Tên hệ phái</th>
+                        <th class="py-3.5 px-4 w-36">Vai trò</th>
+                        <th class="py-3.5 px-4">Role Discord tương ứng khi Link</th>
+                        <th class="py-3.5 px-6 w-20 text-right">Xóa</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-sm">
+                    @foreach (var item in _classEditors)
+                    {
+                        var isUploadingThis = _uploadingClass == item.GameClass;
+                        var softBg = $"{item.HexColor}1F";
+                        var softBorder = $"{item.HexColor}55";
+
+                        <tr class="hover:bg-sky-50/40 transition">
+                            <!-- Icon + Đổi icon gọn trên 1 hàng -->
+                            <td class="py-3 px-6">
+                                <div class="flex items-center gap-2.5 flex-nowrap">
+                                    <div class="w-10 h-10 rounded-xl border flex items-center justify-center shadow-xs flex-shrink-0"
+                                         style="background:@softBg; border-color:@softBorder">
+                                        @if (isUploadingThis)
+                                        {
+                                            <span class="w-4 h-4 border-2 border-brand-600 border-t-transparent rounded-full animate-spin"></span>
+                                        }
+                                        else
+                                        {
+                                            <img src="/icons/@item.IconFileName" alt="@item.DisplayName" class="w-6 h-6 object-contain" />
+                                        }
+                                    </div>
+
+                                    <label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold shadow-xs transition cursor-pointer whitespace-nowrap">
+                                        <svg class="w-3.5 h-3.5 text-brand-600 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 4v12m0-12l-4 4m4-4l4 4" />
+                                        </svg>
+                                        <span>Đổi icon</span>
+                                        <InputFile OnChange="e => HandleUploadClassIconAsync(item, e)" accept=".png,.webp" class="hidden" />
+                                    </label>
+                                </div>
+                            </td>
+
+                            <!-- Ô chọn màu hệ phái -->
+                            <td class="py-3 px-4">
+                                <div class="inline-flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5">
+                                    <input type="color"
+                                           value="@item.HexColor"
+                                           @oninput="e => item.HexColor = MemberManagementService.NormalizeHexColor(e.Value?.ToString(), item.HexColor)"
+                                           title="Chọn màu hệ phái"
+                                           class="w-6 h-6 rounded-md border-0 p-0 cursor-pointer bg-transparent" />
+                                    <span class="font-mono text-xs font-semibold text-slate-600 uppercase">@item.HexColor</span>
+                                </div>
+                            </td>
+
+                            <!-- Tên hệ phái -->
+                            <td class="py-3 px-4">
+                                <div class="flex items-center gap-2">
+                                    <input type="text"
+                                           @bind="item.DisplayName"
+                                           maxlength="80"
+                                           placeholder="Tên hệ phái"
+                                           class="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500" />
+                                    @if (item.IsCustom)
+                                    {
+                                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 whitespace-nowrap">Mới</span>
+                                    }
+                                </div>
+                            </td>
+
+                            <!-- Vai trò Tank / DPS / Healer -->
+                            <td class="py-3 px-4">
+                                <SearchSelect Options="@ClassRoleOptions"
+                                              Value="@(((int)item.Role).ToString())"
+                                              ValueChanged="v => item.Role = ParseClassRole(v)"
+                                              SearchPlaceholder="Tìm vai trò..."
+                                              MinDropdownWidthClass="min-w-[140px]" />
+                            </td>
+
+                            <!-- Role Discord -->
+                            <td class="py-3 px-4">
+                                <SearchSelect Options="@ClassDiscordRoleOptions"
+                                              @bind-Value="item.SelectedRoleIdStr"
+                                              Placeholder="-- Không gán Role Discord --"
+                                              SearchPlaceholder="Tìm Role Discord..."
+                                              AllowClear="true" />
+                            </td>
+
+                            <!-- Xóa hệ phái custom -->
+                            <td class="py-3 px-6 text-right">
+                                @if (item.IsCustom)
+                                {
+                                    <button type="button"
+                                            @onclick="() => HandleDeleteCustomClassAsync(item)"
+                                            title="Xóa hệ phái tùy chỉnh này"
+                                            class="w-8 h-8 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 inline-flex items-center justify-center transition cursor-pointer">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6m5 5v6m4-6v6" />
+                                        </svg>
+                                    </button>
+                                }
+                                else
+                                {
+                                    <span class="text-xs text-slate-300 select-none">—</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="px-6 py-4 bg-slate-50/80 border-t border-slate-100 flex items-center justify-end">
+            <button type="button"
+                    @onclick="SaveClassConfigsAsync"
+                    disabled="@_savingClasses"
+                    class="px-5 py-2.5 rounded-xl bg-slatebtn hover:bg-slatebtn-hover disabled:opacity-60 text-white text-sm font-semibold shadow-sm transition cursor-pointer whitespace-nowrap">
+                @(_savingClasses ? "Đang lưu..." : "Lưu tất cả")
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Thêm hệ phái mới -->
+@if (_showAddClassModal)
+{
+    <div class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 class="text-base font-extrabold text-slate-900">Thêm hệ phái mới</h3>
+                <button type="button" @onclick="CloseAddClassModal" disabled="@_creatingClass" class="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+            </div>
+
+            <div class="p-6 space-y-4">
+                @if (!string.IsNullOrWhiteSpace(_addClassError))
+                {
+                    <div class="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium rounded-xl px-3.5 py-2.5">
+                        ⚠️ @_addClassError
+                    </div>
+                }
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Tên hệ phái *</label>
+                    <input type="text" @bind="_newClassName" maxlength="80" placeholder="VD: Triều Quang, Thương Lan..."
+                           class="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500" />
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Vai trò</label>
+                        <SearchSelect Options="@ClassRoleOptions"
+                                      Value="@(((int)_newClassRole).ToString())"
+                                      ValueChanged="v => _newClassRole = ParseClassRole(v)"
+                                      SearchPlaceholder="Tìm vai trò..."
+                                      MinDropdownWidthClass="min-w-[140px]" />
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Màu sắc</label>
+                        <div class="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-1.5">
+                            <input type="color"
+                                   value="@_newClassHex"
+                                   @oninput="e => _newClassHex = MemberManagementService.NormalizeHexColor(e.Value?.ToString(), _newClassHex)"
+                                   class="w-6 h-6 rounded border-0 p-0 cursor-pointer bg-transparent" />
+                            <span class="font-mono text-xs font-semibold text-slate-600 uppercase">@_newClassHex</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Role Discord tương ứng (tùy chọn)</label>
+                    <SearchSelect Options="@ClassDiscordRoleOptions"
+                                  @bind-Value="_newClassRoleIdStr"
+                                  Placeholder="-- Không gán Role Discord --"
+                                  SearchPlaceholder="Tìm Role Discord..."
+                                  AllowClear="true" />
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Icon hệ phái (.png / .webp — tùy chọn)</label>
+                    <div class="flex items-center gap-3">
+                        <label class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-slate-700 text-xs font-semibold cursor-pointer transition">
+                            <span>Chọn ảnh PNG/WEBP</span>
+                            <InputFile OnChange="HandleNewClassIconSelected" accept=".png,.webp" class="hidden" />
+                        </label>
+                        <span class="text-xs text-slate-500 truncate max-w-[190px]">
+                            @(_newClassIconFile?.Name ?? "Mặc định theo vai trò")
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                <button type="button" @onclick="CloseAddClassModal" disabled="@_creatingClass"
+                        class="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 cursor-pointer">
+                    Hủy
+                </button>
+                <button type="button" @onclick="SubmitAddClassAsync" disabled="@_creatingClass"
+                        class="px-5 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold shadow-sm cursor-pointer">
+                    @(_creatingClass ? "Đang thêm..." : "Thêm hệ phái")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private sealed class ClassEditorRow
+    {
+        public GameClass GameClass { get; set; }
+        public ClassRole Role { get; set; } = ClassRole.Dps;
+        public string DisplayName { get; set; } = string.Empty;
+        public string IconFileName { get; set; } = string.Empty;
+        public string HexColor { get; set; } = "#6366F1";
+        public string SelectedRoleIdStr { get; set; } = string.Empty;
+        public bool IsCustom { get; set; }
+        public int SortOrder { get; set; }
+    }
+
+    private List<DiscordRoleOption> _roles = [];
+    private List<ClassEditorRow> _classEditors = [];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> ClassRoleOptions =
+    [
+        new(((int)ClassRole.Tank).ToString(), "Tank", ColorDot: "#D97706"),
+        new(((int)ClassRole.Dps).ToString(), "DPS", ColorDot: "#DC2626"),
+        new(((int)ClassRole.Healer).ToString(), "Healer", ColorDot: "#10B981")
+    ];
+
+    private IReadOnlyList<SearchSelect.SelectOption> MemberRoleOptions =>
+        [
+            new("", "Tất cả thành viên server"),
+            .. _roles.Select(r => new SearchSelect.SelectOption(
+                r.RoleId.ToString(),
+                $"@{r.Name}",
+                ColorDot: r.Color > 0 ? $"#{r.Color:X6}" : "#94A3B8"))
+        ];
+
+    private IReadOnlyList<SearchSelect.SelectOption> ClassDiscordRoleOptions =>
+        [
+            new("", "Không gán Role Discord"),
+            .. _roles.Select(r => new SearchSelect.SelectOption(
+                r.RoleId.ToString(),
+                $"@{r.Name}",
+                ColorDot: r.Color > 0 ? $"#{r.Color:X6}" : "#94A3B8"))
+        ];
+
+    private static ClassRole ParseClassRole(string? val) =>
+        int.TryParse(val, out var i) && Enum.IsDefined(typeof(ClassRole), i)
+            ? (ClassRole)i
+            : ClassRole.Dps;
+
+    private string _selectedRoleIdStr = string.Empty;
+    private bool _loadingRoles = true;
+    private bool _savingRole;
+    private bool _savingClasses;
+    private GameClass? _uploadingClass;
+
+    private string? _roleStatusMsg;
+    private string? _classStatusMsg;
+    private bool _classStatusError;
+
+    // Add Custom Class Modal state
+    private bool _showAddClassModal;
+    private bool _creatingClass;
+    private string _newClassName = string.Empty;
+    private ClassRole _newClassRole = ClassRole.Dps;
+    private string _newClassHex = "#0EA5E9";
+    private string _newClassRoleIdStr = string.Empty;
+    private IBrowserFile? _newClassIconFile;
+    private string? _addClassError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.StateChanged += HandleSessionChanged;
+        await LoadAllAsync();
+    }
+
+    private async Task LoadAllAsync()
+    {
+        if (Session.CurrentGuildId == 0) return;
+
+        var cfg = await MemberService.GetGuildConfigAsync(Session.CurrentGuildId);
+        _selectedRoleIdStr = cfg?.MemberRoleId?.ToString() ?? string.Empty;
+
+        var resolvedClasses = await MemberService.GetResolvedClassConfigsAsync(Session.CurrentGuildId);
+        _classEditors = resolvedClasses.Select(c => new ClassEditorRow
+        {
+            GameClass = c.GameClass,
+            Role = c.Role,
+            DisplayName = c.DisplayName,
+            IconFileName = c.IconFileName,
+            HexColor = c.HexColor,
+            SelectedRoleIdStr = c.DiscordRoleId?.ToString() ?? string.Empty,
+            IsCustom = c.IsCustom,
+            SortOrder = c.SortOrder
+        }).ToList();
+
+        await LoadRolesAsync();
+    }
+
+    private async Task LoadRolesAsync()
+    {
+        if (Session.CurrentGuildId == 0) return;
+        _loadingRoles = true;
+        StateHasChanged();
+
+        _roles = await SyncService.GetGuildRolesAsync(Session.CurrentGuildId);
+        _loadingRoles = false;
+    }
+
+    private async Task SaveMemberRoleConfigAsync()
+    {
+        if (Session.CurrentGuildId == 0) return;
+        _savingRole = true;
+        _roleStatusMsg = null;
+
+        ulong? roleId = ulong.TryParse(_selectedRoleIdStr, out var parsed) ? parsed : null;
+        var roleName = roleId.HasValue ? _roles.FirstOrDefault(r => r.RoleId == roleId.Value)?.Name : null;
+
+        await MemberService.UpdateMemberRoleConfigAsync(Session.CurrentGuildId, roleId, roleName);
+        _savingRole = false;
+        _roleStatusMsg = roleId.HasValue
+            ? $"Đã lưu Role bang '@{roleName}'. Hãy bấm 'Sync Discord' ở góc trên để cập nhật lại danh sách."
+            : "Đã chuyển sang chế độ đồng bộ toàn bộ thành viên server.";
+    }
+
+    private async Task SaveClassConfigsAsync()
+    {
+        if (Session.CurrentGuildId == 0) return;
+        _savingClasses = true;
+        _classStatusMsg = null;
+
+        var payload = _classEditors.Select((row, idx) =>
+        {
+            ulong? roleId = ulong.TryParse(row.SelectedRoleIdStr, out var rId) ? rId : null;
+            var roleName = roleId.HasValue ? _roles.FirstOrDefault(r => r.RoleId == roleId.Value)?.Name : null;
+
+            return new GuildClassConfig
+            {
+                GuildId = Session.CurrentGuildId,
+                GameClass = row.GameClass,
+                Role = row.Role,
+                DisplayName = row.DisplayName,
+                HexColor = row.HexColor,
+                IconFileName = row.IconFileName,
+                DiscordRoleId = roleId,
+                DiscordRoleName = roleName,
+                SortOrder = idx + 1,
+                IsCustom = row.IsCustom
+            };
+        }).ToList();
+
+        await MemberService.SaveClassConfigsAsync(Session.CurrentGuildId, payload);
+        _savingClasses = false;
+        _classStatusError = false;
+        _classStatusMsg = $"Đã lưu cấu hình {_classEditors.Count} hệ phái (Icon, Màu sắc, Tên, Vai trò & Role Discord).";
+        Session.NotifyStateChanged();
+    }
+
+    private async Task HandleUploadClassIconAsync(ClassEditorRow row, InputFileChangeEventArgs e)
+    {
+        if (Session.CurrentGuildId == 0) return;
+        _classStatusMsg = null;
+        var file = e.File;
+        if (file is null) return;
+
+        if (file.Size > 512 * 1024)
+        {
+            _classStatusError = true;
+            _classStatusMsg = "Kích thước icon vượt quá 512 KB. Vui lòng chọn ảnh PNG/WEBP nhỏ hơn.";
+            return;
+        }
+
+        _uploadingClass = row.GameClass;
+        StateHasChanged();
+
+        try
+        {
+            await using var stream = file.OpenReadStream(maxAllowedSize: 512 * 1024);
+            var (success, relPath, error) = await MemberService.UploadClassIconAsync(
+                Session.CurrentGuildId,
+                row.GameClass,
+                file.Name,
+                stream);
+
+            if (!success || string.IsNullOrWhiteSpace(relPath))
+            {
+                _classStatusError = true;
+                _classStatusMsg = error ?? "Không thể tải lên icon.";
+                return;
+            }
+
+            row.IconFileName = relPath;
+            _classStatusError = false;
+            _classStatusMsg = $"Đã cập nhật icon riêng cho hệ phái '{row.DisplayName}'.";
+            Session.NotifyStateChanged();
+        }
+        finally
+        {
+            _uploadingClass = null;
+        }
+    }
+
+    private void OpenAddClassModal()
+    {
+        _newClassName = string.Empty;
+        _newClassRole = ClassRole.Dps;
+        _newClassHex = "#0EA5E9";
+        _newClassRoleIdStr = string.Empty;
+        _newClassIconFile = null;
+        _addClassError = null;
+        _showAddClassModal = true;
+    }
+
+    private void CloseAddClassModal()
+    {
+        if (!_creatingClass) _showAddClassModal = false;
+    }
+
+    private void HandleNewClassIconSelected(InputFileChangeEventArgs e)
+    {
+        _newClassIconFile = e.File;
+    }
+
+    private async Task SubmitAddClassAsync()
+    {
+        if (Session.CurrentGuildId == 0 || _creatingClass) return;
+
+        if (string.IsNullOrWhiteSpace(_newClassName))
+        {
+            _addClassError = "Vui lòng nhập tên hệ phái.";
+            return;
+        }
+
+        if (_newClassIconFile is not null && _newClassIconFile.Size > 512 * 1024)
+        {
+            _addClassError = "Kích thước icon vượt quá 512 KB.";
+            return;
+        }
+
+        _creatingClass = true;
+        _addClassError = null;
+
+        try
+        {
+            ulong? roleId = ulong.TryParse(_newClassRoleIdStr, out var parsedId) ? parsedId : null;
+            var roleName = roleId.HasValue ? _roles.FirstOrDefault(r => r.RoleId == roleId.Value)?.Name : null;
+
+            Stream? iconStream = _newClassIconFile?.OpenReadStream(maxAllowedSize: 512 * 1024);
+            try
+            {
+                var (success, created, error) = await MemberService.AddCustomClassAsync(
+                    Session.CurrentGuildId,
+                    _newClassName,
+                    _newClassRole,
+                    _newClassHex,
+                    roleId,
+                    roleName,
+                    _newClassIconFile?.Name,
+                    iconStream);
+
+                if (!success || created is null)
+                {
+                    _addClassError = error ?? "Không thể thêm hệ phái mới.";
+                    return;
+                }
+
+                _classEditors.Add(new ClassEditorRow
+                {
+                    GameClass = created.GameClass,
+                    Role = created.Role,
+                    DisplayName = created.DisplayName,
+                    IconFileName = created.IconFileName,
+                    HexColor = created.HexColor,
+                    SelectedRoleIdStr = created.DiscordRoleId?.ToString() ?? string.Empty,
+                    IsCustom = true,
+                    SortOrder = created.SortOrder
+                });
+
+                _showAddClassModal = false;
+                _classStatusError = false;
+                _classStatusMsg = $"Đã thêm hệ phái mới '{created.DisplayName}'.";
+                Session.NotifyStateChanged();
+            }
+            finally
+            {
+                if (iconStream is not null) await iconStream.DisposeAsync();
+            }
+        }
+        finally
+        {
+            _creatingClass = false;
+        }
+    }
+
+    private async Task HandleDeleteCustomClassAsync(ClassEditorRow row)
+    {
+        if (Session.CurrentGuildId == 0 || !row.IsCustom) return;
+
+        var (success, error) = await MemberService.DeleteCustomClassAsync(Session.CurrentGuildId, row.GameClass);
+        if (!success)
+        {
+            _classStatusError = true;
+            _classStatusMsg = error ?? "Không thể xóa hệ phái.";
+            return;
+        }
+
+        _classEditors.Remove(row);
+        _classStatusError = false;
+        _classStatusMsg = $"Đã xóa hệ phái tùy chỉnh '{row.DisplayName}'.";
+        Session.NotifyStateChanged();
+    }
+
+    private async void HandleSessionChanged()
+    {
+        await InvokeAsync(async () =>
+        {
+            _roleStatusMsg = null;
+            _classStatusMsg = null;
+            await LoadAllAsync();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose() => Session.StateChanged -= HandleSessionChanged;
+}

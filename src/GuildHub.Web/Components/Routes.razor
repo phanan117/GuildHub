@@ -1,0 +1,35 @@
+﻿<CascadingAuthenticationState>
+    <Router AppAssembly="typeof(Program).Assembly">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+                <NotAuthorized>
+                    <RedirectToLogin />
+                </NotAuthorized>
+                <Authorizing>
+                    <div class="min-h-screen flex items-center justify-center bg-canvas">
+                        <div class="flex items-center gap-3 text-slate-600 font-medium">
+                            <span class="w-5 h-5 border-2 border-brand-600 border-t-transparent rounded-full animate-spin"></span>
+                            Đang xác thực phiên quản trị...
+                        </div>
+                    </div>
+                </Authorizing>
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        </Found>
+        <NotFound>
+            <PageTitle>Không tìm thấy trang</PageTitle>
+            <LayoutView Layout="typeof(Layout.EmptyLayout)">
+                <div class="min-h-screen flex items-center justify-center bg-canvas p-6">
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-card p-8 max-w-md w-full text-center">
+                        <div class="text-5xl font-extrabold text-brand-600 mb-2">404</div>
+                        <h2 class="text-lg font-bold text-slate-800 mb-2">Không tìm thấy trang yêu cầu</h2>
+                        <p class="text-sm text-slate-500 mb-6">Đường dẫn bạn truy cập không tồn tại trong không gian quản trị GuildHub.</p>
+                        <a href="/" class="inline-flex items-center justify-center px-5 py-2.5 rounded-xl bg-slatebtn hover:bg-slatebtn-hover text-white text-sm font-semibold transition">
+                            Quay về Tổng quan
+                        </a>
+                    </div>
+                </div>
+            </LayoutView>
+        </NotFound>
+    </Router>
+</CascadingAuthenticationState>

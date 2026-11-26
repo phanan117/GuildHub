@@ -1,0 +1,44 @@
+@using System.Globalization
+
+<div class="flex items-center gap-4 bg-sky-50/60 hover:bg-sky-50 border border-slate-200/80 rounded-2xl px-4 py-3.5 transition">
+    <div class="relative flex-shrink-0 inline-flex items-center justify-center" style="width: 64px; height: 64px;">
+        <svg width="64" height="64" viewBox="0 0 80 80" class="-rotate-90">
+            <circle cx="40" cy="40" r="30"
+                    fill="none"
+                    stroke="#e2e8f0"
+                    stroke-width="8" />
+            <circle cx="40" cy="40" r="30"
+                    fill="none"
+                    stroke="@AccentColor"
+                    stroke-width="8"
+                    stroke-linecap="round"
+                    stroke-dasharray="@DashArray"
+                    class="donut-segment" />
+        </svg>
+        <span class="absolute text-sm font-extrabold text-slate-800">@ClampedPercent%</span>
+    </div>
+
+    <div class="min-w-0">
+        <div class="text-sm font-bold text-slate-800 truncate">@Title</div>
+        <div class="text-xs text-slate-500 mt-0.5">@Subtitle</div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int Percent { get; set; }
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Subtitle { get; set; } = string.Empty;
+    [Parameter] public string AccentColor { get; set; } = "#6d597a";
+
+    private const double Circumference = 2 * Math.PI * 30;
+    private int ClampedPercent => Math.Clamp(Percent, 0, 100);
+
+    private string DashArray
+    {
+        get
+        {
+            var filled = (ClampedPercent / 100.0) * Circumference;
+            return $"{filled.ToString("0.###", CultureInfo.InvariantCulture)} {Circumference.ToString("0.###", CultureInfo.InvariantCulture)}";
+        }
+    }
+}

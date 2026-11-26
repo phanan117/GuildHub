@@ -1,0 +1,59 @@
+@using System.Globalization
+
+<div class="relative inline-flex items-center justify-center" style="width: @(Size)px; height: @(Size)px;">
+    <svg width="@Size" height="@Size" viewBox="0 0 120 120" class="-rotate-90">
+        <!-- Background track -->
+        <circle cx="60" cy="60" r="@RadiusStr"
+                fill="none"
+                stroke="#e2e8f0"
+                stroke-width="@StrokeWidth" />
+
+        @if (Total > 0)
+        {
+            double offset = 0;
+            foreach (var seg in Segments.Where(s => s.Value > 0))
+            {
+                var length = (seg.Value / (double)Total) * Circumference;
+                var dashArray = $"{Fmt(length)} {Fmt(Circumference)}";
+                var dashOffset = Fmt(-offset);
+                offset += length;
+
+                <circle cx="60" cy="60" r="@RadiusStr"
+                        fill="none"
+                        stroke="@seg.Color"
+                        stroke-width="@StrokeWidth"
+                        stroke-dasharray="@dashArray"
+                        stroke-dashoffset="@dashOffset"
+                        class="donut-segment">
+                    <title>@seg.Label: @seg.Value</title>
+                </circle>
+            }
+        }
+    </svg>
+
+    <div class="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-2">
+        <span class="text-2xl font-extrabold text-slate-800 leading-none tracking-tight">@CenterValue</span>
+        @if (!string.IsNullOrWhiteSpace(CenterLabel))
+        {
+            <span class="text-[11px] font-medium text-slate-500 mt-1">@CenterLabel</span>
+        }
+    </div>
+</div>
+
+@code {
+    public sealed record DonutSegment(string Label, int Value, string Color);
+
+    [Parameter] public IReadOnlyList<DonutSegment> Segments { get; set; } = [];
+    [Parameter] public int Size { get; set; } = 132;
+    [Parameter] public int StrokeWidth { get; set; } = 14;
+    [Parameter] public string CenterValue { get; set; } = "0";
+    [Parameter] public string CenterLabel { get; set; } = "thành viên";
+
+    private const double Radius = 46;
+    private static readonly string RadiusStr = Radius.ToString(CultureInfo.InvariantCulture);
+    private static readonly double Circumference = 2 * Math.PI * Radius;
+
+    private int Total => Segments.Sum(s => Math.Max(0, s.Value));
+
+    private static string Fmt(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+}

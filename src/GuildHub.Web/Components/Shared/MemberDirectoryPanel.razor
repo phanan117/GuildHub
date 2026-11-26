@@ -1,0 +1,1277 @@
+@implements IDisposable
+@inject GuildSessionState Session
+@inject MemberManagementService MemberService
+@inject DiscordSyncService SyncService
+
+<section class="bg-white rounded-2xl border border-slate-200/90 shadow-card">
+    <!-- Section Header -->
+    <div class="px-6 pt-5 pb-4 flex items-center justify-between gap-4 border-b border-slate-100 rounded-t-2xl">
+        <div>
+            <div class="text-xs font-medium text-slate-500">Quản lý thành viên</div>
+            <h2 class="text-lg font-extrabold text-slate-900 tracking-tight mt-0.5">Danh sách thành viên</h2>
+            <div class="text-xs text-slate-500 mt-0.5">@_result.TotalCount kết quả</div>
+        </div>
+
+        <button type="button"
+                @onclick="OpenAddModalAsync"
+                title="Thêm thành viên vào bang"
+                class="w-10 h-10 rounded-xl bg-slatebtn hover:bg-slatebtn-hover text-white flex items-center justify-center shadow-sm transition cursor-pointer">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="8.5" cy="7" r="3.5" />
+                <path stroke-linecap="round" d="M20 8v6M17 11h6" />
+            </svg>
+        </button>
+    </div>
+
+    <!-- Action Feedback Banner -->
+    @if (!string.IsNullOrWhiteSpace(_actionMessage))
+    {
+        <div class="px-6 pt-3">
+            <div class="@(_actionIsError ? "bg-rose-50 border-rose-200 text-rose-800" : "bg-emerald-50 border-emerald-200 text-emerald-800") border rounded-xl px-4 py-2.5 text-xs font-medium flex items-center justify-between gap-3">
+                <span>@(_actionIsError ? "⚠️ " : "✅ ")@_actionMessage</span>
+                <button type="button" @onclick="() => _actionMessage = null" class="font-bold opacity-60 hover:opacity-100 px-1">✕</button>
+            </div>
+        </div>
+    }
+
+    <!-- Filter Bar (Tự động lọc ngay khi gõ / chọn, không cần nút Áp dụng) -->
+    <div class="px-6 py-4 bg-sky-50/50 border-b border-slate-200/70">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
+            <div class="lg:col-span-4">
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Tìm thành viên</label>
+                <div class="relative">
+                    <input type="text"
+                           value="@_searchText"
+                           @oninput="HandleSearchInputAsync"
+                           placeholder="Tên, nickname hoặc username..."
+                           class="w-full bg-white border border-slate-200 rounded-xl pl-3.5 pr-8 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500" />
+                    @if (!string.IsNullOrEmpty(_searchText))
+                    {
+                        <button type="button"
+                                @onclick="ClearSearchAsync"
+                                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold cursor-pointer">
+                            ✕
+                        </button>
+                    }
+                </div>
+            </div>
+
+            <div class="lg:col-span-2">
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Phái</label>
+                <SearchSelect Options="ClassFilterOptions"
+                              Value="@_selectedClass"
+                              ValueChanged="HandleClassFilterChangedAsync"
+                              Placeholder="Tất cả"
+                              SearchPlaceholder="Tìm môn phái..."
+                              AllowClear="@(!string.IsNullOrEmpty(_selectedClass))" />
+            </div>
+
+            <div class="lg:col-span-2">
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Trạng thái</label>
+                <SearchSelect Options="StatusFilterOptions"
+                              Value="@_statusFilter.ToString()"
+                              ValueChanged="HandleStatusFilterChangedAsync"
+                              Placeholder="Tất cả"
+                              SearchPlaceholder="Tìm trạng thái..." />
+            </div>
+
+            <div class="lg:col-span-2">
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Role Discord</label>
+                <SearchSelect Options="RoleFilterOptions"
+                              Value="@_roleFilter.ToString()"
+                              ValueChanged="HandleRoleFilterChangedAsync"
+                              Placeholder="Tất cả"
+                              SearchPlaceholder="Tìm trạng thái role..." />
+            </div>
+
+            <div class="lg:col-span-2 flex items-end gap-2">
+                <div class="flex-1 min-w-[84px]">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Số dòng</label>
+                    <SearchSelect Options="PageSizeOptions"
+                                  Value="@_pageSize.ToString()"
+                                  ValueChanged="HandlePageSizeChangedAsync"
+                                  SearchPlaceholder="Số dòng..."
+                                  AlignRight="true"
+                                  MinDropdownWidthClass="min-w-[130px]" />
+                </div>
+
+                @if (HasActiveFilters)
+                {
+                    <button type="button"
+                            @onclick="ResetFiltersAsync"
+                            title="Xóa toàn bộ bộ lọc"
+                            class="bg-white hover:bg-slate-50 border border-slate-300 text-slate-600 font-semibold text-xs px-3 py-2.5 rounded-xl shadow-sm transition cursor-pointer whitespace-nowrap">
+                        Đặt lại
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- Table -->
+    <div class="overflow-x-auto xl:overflow-visible">
+        <table class="w-full text-left border-collapse">
+            <thead>
+                <tr class="bg-slate-50/80 border-b border-slate-200 text-xs font-bold text-slate-600">
+                    <th class="py-3 px-5">
+                        <button type="button" @onclick='() => ToggleSortAsync("name")' class="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer">
+                            <span>Thành viên</span>
+                            <span class="@SortBadgeClass("name")">@SortArrow("name")</span>
+                        </button>
+                    </th>
+                    <th class="py-3 px-4 w-60">
+                        <button type="button" @onclick='() => ToggleSortAsync("nickname")' class="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer">
+                            <span>Nickname</span>
+                            <span class="@SortBadgeClass("nickname")">@SortArrow("nickname")</span>
+                        </button>
+                    </th>
+                    <th class="py-3 px-4">
+                        <button type="button" @onclick='() => ToggleSortAsync("username")' class="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer">
+                            <span>Username</span>
+                            <span class="@SortBadgeClass("username")">@SortArrow("username")</span>
+                        </button>
+                    </th>
+                    <th class="py-3 px-4">
+                        <button type="button" @onclick='() => ToggleSortAsync("class")' class="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer">
+                            <span>Phái</span>
+                            <span class="@SortBadgeClass("class")">@SortArrow("class")</span>
+                        </button>
+                    </th>
+                    <th class="py-3 px-4">
+                        <button type="button" @onclick='() => ToggleSortAsync("status")' class="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer">
+                            <span>Trạng thái</span>
+                            <span class="@SortBadgeClass("status")">@SortArrow("status")</span>
+                        </button>
+                    </th>
+                    <th class="py-3 px-4">
+                        <button type="button" @onclick='() => ToggleSortAsync("role")' class="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer">
+                            <span>Role</span>
+                            <span class="@SortBadgeClass("role")">@SortArrow("role")</span>
+                        </button>
+                    </th>
+                    <th class="py-3 px-5 text-right">Thao tác</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 text-sm">
+                @if (_isLoading)
+                {
+                    <tr>
+                        <td colspan="7" class="py-12 text-center text-slate-500">
+                            <span class="inline-block w-5 h-5 border-2 border-brand-600 border-t-transparent rounded-full animate-spin align-middle mr-2"></span>
+                            Đang tải danh sách thành viên...
+                        </td>
+                    </tr>
+                }
+                else if (_result.Items.Count == 0)
+                {
+                    <tr>
+                        <td colspan="7" class="py-14 text-center">
+                            <div class="text-slate-400 text-sm font-medium">Chưa có thành viên phù hợp bộ lọc.</div>
+                            <div class="text-xs text-slate-400 mt-1">Hãy bấm nút <strong>Sync Discord</strong> ở góc trên bên phải để đồng bộ danh sách thành viên từ server Discord.</div>
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var member in _result.Items)
+                    {
+                        var isEditingClass = _editingClassMemberId == member.Id;
+                        <tr class="hover:bg-sky-50/40 transition group">
+                            <!-- Thành viên -->
+                            <td class="py-3 px-5">
+                                <div class="flex items-center gap-2.5 min-w-[140px]">
+                                    @if (!string.IsNullOrWhiteSpace(member.AvatarUrl))
+                                    {
+                                        <img src="@member.AvatarUrl" alt="" class="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 flex-shrink-0" />
+                                    }
+                                    else
+                                    {
+                                        <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold text-xs flex items-center justify-center flex-shrink-0">
+                                            @(string.IsNullOrEmpty(member.DisplayName) ? "?" : member.DisplayName[0].ToString().ToUpperInvariant())
+                                        </div>
+                                    }
+                                    <div class="min-w-0">
+                                        <div class="font-bold text-slate-800 truncate max-w-[180px]">@member.EffectiveName</div>
+                                        @if (!string.IsNullOrWhiteSpace(member.IngameNickname) && member.IngameNickname != member.DisplayName)
+                                        {
+                                            <div class="text-[11px] text-slate-400 truncate max-w-[180px]">@member.DisplayName</div>
+                                        }
+                                    </div>
+                                </div>
+                            </td>
+
+                            <!-- Nickname (inline edit) -->
+                            <td class="py-3 px-4">
+                                <div class="flex items-center gap-1.5">
+                                    <input type="text"
+                                           value="@(member.IngameNickname ?? string.Empty)"
+                                           @onchange="e => HandleNicknameChangedAsync(member, e.Value?.ToString())"
+                                           disabled="@member.IsRemoved"
+                                           placeholder="Nhập tên ingame..."
+                                           class="w-40 sm:w-44 bg-white border border-slate-200 hover:border-slate-300 focus:border-brand-500 rounded-xl px-3 py-1.5 text-sm text-slate-700 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-slate-50 transition" />
+                                    <button type="button"
+                                            @onclick="() => HandleNicknameChangedAsync(member, null)"
+                                            disabled="@(member.IsRemoved || string.IsNullOrEmpty(member.IngameNickname))"
+                                            title="Xóa nickname"
+                                            class="w-8 h-8 rounded-xl bg-sky-50 hover:bg-sky-100 disabled:opacity-40 border border-sky-200/80 text-slate-600 flex items-center justify-center text-xs font-bold transition cursor-pointer">
+                                        ✕
+                                    </button>
+                                    @if (_savedMemberId == member.Id)
+                                    {
+                                        <span class="text-emerald-600 text-xs font-bold" title="Đã lưu">✓</span>
+                                    }
+                                </div>
+                            </td>
+
+                            <!-- Username -->
+                            <td class="py-3 px-4 text-slate-500 font-medium">
+                                @member.DiscordUsername
+                            </td>
+
+                            <!-- Phái -->
+                            <td class="py-3 px-4">
+                                @if (member.GameClass.HasValue)
+                                {
+                                    var info = GetClassDisplay(member.GameClass.Value);
+                                    <div class="inline-flex items-center gap-2 font-semibold text-slate-700">
+                                        <img src="/icons/@info.IconFileName" alt="@info.DisplayName" class="w-5 h-5 object-contain" />
+                                        <span>@info.DisplayName</span>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="text-slate-400 font-medium">Chưa link</span>
+                                }
+                            </td>
+
+                            <!-- Trạng thái -->
+                            <td class="py-3 px-4">
+                                @if (member.IsRemoved)
+                                {
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                                        Đã remove
+                                    </span>
+                                }
+                                else if (member.GameClass.HasValue)
+                                {
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                        Đã link
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                                        Chưa link
+                                    </span>
+                                }
+                            </td>
+
+                            <!-- Role -->
+                            <td class="py-3 px-4">
+                                @if (member.IsExternal)
+                                {
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                                        Ngoại binh
+                                    </span>
+                                }
+                                else if (member.HasGuildRole)
+                                {
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                        Có role
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                                        Mất role
+                                    </span>
+                                }
+                            </td>
+
+                            <!-- Thao tác -->
+                            <td class="py-3 px-5">
+                                <div class="flex items-center justify-end gap-1.5">
+                                    @if (member.IsRemoved)
+                                    {
+                                        <button type="button"
+                                                @onclick="() => HandleRestoreAsync(member)"
+                                                disabled="@_isProcessingRole"
+                                                title="Khôi phục hồ sơ và gán lại Role bang trên Discord"
+                                                class="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 border border-emerald-200 text-emerald-700 text-xs font-semibold transition cursor-pointer">
+                                            Khôi phục
+                                        </button>
+                                        <button type="button"
+                                                @onclick="() => HandleHardDeleteAsync(member)"
+                                                disabled="@_isProcessingRole"
+                                                class="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 disabled:opacity-50 border border-rose-200 text-rose-700 text-xs font-semibold transition cursor-pointer">
+                                            Xóa hẳn
+                                        </button>
+                                    }
+                                    else if (!member.GameClass.HasValue || isEditingClass)
+                                    {
+                                        <SearchSelect Options="ClassPickOptions"
+                                                      Value="@GetPendingClassValue(member.Id)"
+                                                      ValueChanged="val => SetPendingClassValue(member.Id, val)"
+                                                      Placeholder="Chọn phái"
+                                                      SearchPlaceholder="Tìm môn phái..."
+                                                      Compact="true"
+                                                      AlignRight="true"
+                                                      WrapperClass="w-36"
+                                                      MinDropdownWidthClass="min-w-[200px]" />
+                                        <button type="button"
+                                                @onclick="() => HandleLinkClassAsync(member)"
+                                                title="Gán môn phái"
+                                                class="w-8 h-8 rounded-xl bg-slatebtn hover:bg-slatebtn-hover text-white flex items-center justify-center transition cursor-pointer">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                                            </svg>
+                                        </button>
+                                        @if (isEditingClass)
+                                        {
+                                            <button type="button"
+                                                    @onclick="() => HandleUnlinkClassAsync(member)"
+                                                    title="Hủy liên kết phái"
+                                                    class="px-2 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 text-xs font-semibold transition cursor-pointer">
+                                                Hủy
+                                            </button>
+                                            <button type="button"
+                                                    @onclick="() => _editingClassMemberId = null"
+                                                    class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold cursor-pointer">
+                                                ✕
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button"
+                                                    @onclick="() => PromptRemoveMemberAsync(member)"
+                                                    title="Gỡ Role bang trên Discord & Remove khỏi danh sách"
+                                                    class="w-8 h-8 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200/80 text-rose-600 flex items-center justify-center transition cursor-pointer">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                                                    <circle cx="8.5" cy="7" r="3.5" />
+                                                    <path stroke-linecap="round" d="M22 11h-6" />
+                                                </svg>
+                                            </button>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <button type="button"
+                                                @onclick="() => StartEditClass(member)"
+                                                title="Đổi / Hủy liên kết phái"
+                                                class="w-8 h-8 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 flex items-center justify-center transition cursor-pointer">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M18.84 12.25l1.72-1.71a5 5 0 0 0-7.07-7.07l-1.72 1.71M5.17 11.75l-1.71 1.71a5 5 0 0 0 7.07 7.07l1.71-1.71M8 2v3M2 8h3M16 19v3M19 16h3" />
+                                            </svg>
+                                        </button>
+                                        <button type="button"
+                                                @onclick="() => PromptRemoveMemberAsync(member)"
+                                                title="Gỡ Role bang trên Discord & Remove khỏi danh sách"
+                                                class="w-8 h-8 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200/80 text-rose-600 flex items-center justify-center transition cursor-pointer">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                                                <circle cx="8.5" cy="7" r="3.5" />
+                                                <path stroke-linecap="round" d="M22 11h-6" />
+                                            </svg>
+                                        </button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination Footer -->
+    @if (_result.TotalCount > 0)
+    {
+        <div class="px-6 py-3.5 bg-slate-50/70 border-t border-slate-100 rounded-b-2xl flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+            <div>
+                Trang <strong>@_result.Page</strong> / <strong>@_result.TotalPages</strong> · Tổng <strong>@_result.TotalCount</strong> thành viên
+            </div>
+            <div class="flex items-center gap-1.5">
+                <button type="button"
+                        disabled="@(_result.Page <= 1)"
+                        @onclick="() => GoToPageAsync(_result.Page - 1)"
+                        class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer">
+                    ← Trước
+                </button>
+                <button type="button"
+                        disabled="@(_result.Page >= _result.TotalPages)"
+                        @onclick="() => GoToPageAsync(_result.Page + 1)"
+                        class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 font-semibold cursor-pointer">
+                    Sau →
+                </button>
+            </div>
+        </div>
+    }
+</section>
+
+<!-- Modal Xác nhận Gỡ Role Discord & Remove thành viên -->
+@if (_pendingRemoveMember is not null)
+{
+    <div class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 class="text-base font-extrabold text-slate-900">Xác nhận gỡ Role & Remove</h3>
+                <button type="button" @onclick="CancelRemoveModal" disabled="@_isProcessingRole" class="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+            </div>
+
+            <div class="p-6 space-y-3 text-sm text-slate-600">
+                <p>
+                    Bạn có chắc muốn remove <strong class="text-slate-900">@_pendingRemoveMember.EffectiveName</strong>
+                    (<span class="text-slate-500">@@@_pendingRemoveMember.DiscordUsername</span>) khỏi bang?
+                </p>
+
+                @if (_pendingRemoveMember.DiscordUserId.HasValue)
+                {
+                    if (_guildConfig?.MemberRoleId is not null)
+                    {
+                        <div class="bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-xs text-rose-800 leading-relaxed">
+                            Bot sẽ <strong>gỡ trực tiếp Role @($"@{_guildConfig.MemberRoleName ?? _guildConfig.MemberRoleId.ToString()}")</strong> khỏi thành viên này trên server Discord và chuyển hồ sơ sang mục <em>Đã remove</em>.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800 leading-relaxed">
+                            ⚠️ Bạn chưa chọn <strong>Role thành viên bang</strong> tại trang
+                            <a href="/settings" class="underline font-bold">Cấu hình (🛡️)</a>, nên Bot chưa biết cần gỡ Role nào trên Discord (chỉ chuyển hồ sơ sang <em>Đã remove</em> trên Web).
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600">
+                        Đây là thành viên thêm thủ công (không gắn Discord ID), hệ thống sẽ chuyển sang mục <em>Đã remove</em>.
+                    </div>
+                }
+            </div>
+
+            <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                <button type="button" @onclick="CancelRemoveModal" disabled="@_isProcessingRole"
+                        class="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 cursor-pointer">
+                    Hủy
+                </button>
+                <button type="button" @onclick="ConfirmRemoveMemberAsync" disabled="@_isProcessingRole"
+                        class="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-sm font-semibold shadow-sm cursor-pointer">
+                    @if (_isProcessingRole)
+                    {
+                        <span class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        <span>Đang gỡ Role...</span>
+                    }
+                    else
+                    {
+                        <span>Xác nhận Remove</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal Thêm thành viên mới (chọn từ thành viên Server Discord chưa có Role bang) -->
+@if (_showAddModal)
+{
+    <div class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full">
+            <div class="px-6 py-4 border-b border-slate-100 rounded-t-2xl flex items-center justify-between">
+                <h3 class="text-base font-extrabold text-slate-900">Thêm thành viên mới</h3>
+                <button type="button" @onclick="CloseAddModal" disabled="@_addingMember" class="text-slate-400 hover:text-slate-600 font-bold text-lg cursor-pointer">✕</button>
+            </div>
+
+            <div class="p-6 space-y-4">
+                @if (!string.IsNullOrWhiteSpace(_addError))
+                {
+                    <div class="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium rounded-xl px-3.5 py-2.5">
+                        ⚠️ @_addError
+                    </div>
+                }
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">
+                        Thành viên Server chưa có Role bang *
+                    </label>
+
+                    @if (_loadingCandidates)
+                    {
+                        <div class="py-3 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500 flex items-center gap-2">
+                            <span class="w-4 h-4 border-2 border-brand-600 border-t-transparent rounded-full animate-spin"></span>
+                            Đang tải danh sách thành viên từ server Discord...
+                        </div>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(_candidatesWarning))
+                    {
+                        <div class="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl px-3.5 py-2.5">
+                            ⚠️ @_candidatesWarning
+                        </div>
+                    }
+                    else
+                    {
+                        <SearchSelect Options="CandidateOptions"
+                                      Value="@_selectedCandidateIdStr"
+                                      ValueChanged="HandleCandidateSelected"
+                                      Placeholder="@($"-- Chọn thành viên ({_unassignedCandidates.Count} người) --")"
+                                      SearchPlaceholder="Tìm theo tên, nickname hoặc username..."
+                                      EmptyText="Không tìm thấy thành viên phù hợp"
+                                      AllowClear="true" />
+                    }
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nickname / Tên Ingame (tùy chọn — tự đổi trên Discord)</label>
+                    <input type="text" @bind="_newDisplayName" maxlength="32" placeholder="Để trống nếu giữ nguyên tên Discord"
+                           class="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500" />
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Môn phái</label>
+                    <SearchSelect Options="ClassPickOptions"
+                                  Value="@_newClassValue"
+                                  ValueChanged="val => _newClassValue = val ?? string.Empty"
+                                  Placeholder="-- Chưa chọn --"
+                                  SearchPlaceholder="Tìm môn phái..."
+                                  AllowClear="true" />
+                </div>
+            </div>
+
+            <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 rounded-b-2xl flex items-center justify-end gap-2.5">
+                <button type="button" @onclick="CloseAddModal" disabled="@_addingMember"
+                        class="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 cursor-pointer">
+                    Hủy
+                </button>
+                <button type="button" @onclick="SubmitAddMemberAsync" disabled="@_addingMember"
+                        class="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-slatebtn hover:bg-slatebtn-hover disabled:opacity-60 text-white text-sm font-semibold shadow-sm cursor-pointer">
+                    @if (_addingMember)
+                    {
+                        <span class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        <span>Đang thêm...</span>
+                    }
+                    else
+                    {
+                        <span>Lưu thành viên</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback OnMembersChanged { get; set; }
+    [Parameter] public MemberLinkFilter? ExternalStatusFilter { get; set; }
+
+    private PagedMembersResult _result = new([], 0, 1, 25);
+    private bool _isLoading = true;
+
+    private string _searchText = string.Empty;
+    private string _selectedClass = string.Empty;
+    private MemberLinkFilter _statusFilter = MemberLinkFilter.ActiveAll;
+    private MemberRoleFilter _roleFilter = MemberRoleFilter.All;
+    private string _sortBy = "name";
+    private bool _sortDesc;
+    private int _page = 1;
+    private int _pageSize = 25;
+
+    private CancellationTokenSource? _searchDebounceCts;
+
+    private long? _savedMemberId;
+    private long? _editingClassMemberId;
+    private readonly Dictionary<long, string> _pendingClassSelections = new();
+
+    private GuildMember? _pendingRemoveMember;
+    private GuildConfig? _guildConfig;
+    private List<ResolvedClassConfig> _classConfigs = [];
+    private Dictionary<GameClass, ResolvedClassConfig> _classConfigMap = new();
+    private bool _isProcessingRole;
+    private string? _actionMessage;
+    private bool _actionIsError;
+
+    private bool _showAddModal;
+    private bool _loadingCandidates;
+    private bool _addingMember;
+    private List<DiscordMemberCandidate> _unassignedCandidates = [];
+    private string? _candidatesWarning;
+    private string _selectedCandidateIdStr = string.Empty;
+
+    private string _newDisplayName = string.Empty;
+    private string _newClassValue = string.Empty;
+    private string? _addError;
+
+    private static string FormatRole(ClassRole role) => role switch
+    {
+        ClassRole.Tank => "Tank",
+        ClassRole.Healer => "Healer",
+        _ => "DPS"
+    };
+
+    private IReadOnlyList<SearchSelect.SelectOption> ClassFilterOptions =>
+    [
+        new SearchSelect.SelectOption(string.Empty, "Tất cả"),
+        .. _classConfigs.Select(c => new SearchSelect.SelectOption(
+            ((int)c.GameClass).ToString(),
+            c.DisplayName,
+            SubLabel: FormatRole(c.Role),
+            IconUrl: $"/icons/{c.IconFileName}"))
+    ];
+
+    private IReadOnlyList<SearchSelect.SelectOption> ClassPickOptions =>
+        _classConfigs.Select(c => new SearchSelect.SelectOption(
+            ((int)c.GameClass).ToString(),
+            c.DisplayName,
+            SubLabel: FormatRole(c.Role),
+            IconUrl: $"/icons/{c.IconFileName}")).ToList();
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> StatusFilterOptions =
+    [
+        new(MemberLinkFilter.ActiveAll.ToString(), "Tất cả"),
+        new(MemberLinkFilter.Linked.ToString(), "Đã link", ColorDot: "#10B981"),
+        new(MemberLinkFilter.Unlinked.ToString(), "Chưa link", ColorDot: "#F59E0B"),
+        new(MemberLinkFilter.Removed.ToString(), "Đã remove", ColorDot: "#F43F5E")
+    ];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> RoleFilterOptions =
+    [
+        new(MemberRoleFilter.All.ToString(), "Tất cả"),
+        new(MemberRoleFilter.HasRole.ToString(), "Có role", ColorDot: "#10B981"),
+        new(MemberRoleFilter.NoRole.ToString(), "Mất role", ColorDot: "#94A3B8")
+    ];
+
+    private static readonly IReadOnlyList<SearchSelect.SelectOption> PageSizeOptions =
+    [
+        new("25", "25 dòng"),
+        new("50", "50 dòng"),
+        new("100", "100 dòng")
+    ];
+
+    private IReadOnlyList<SearchSelect.SelectOption> CandidateOptions =>
+        _unassignedCandidates.Select(c =>
+        {
+            var hasCustomNick = !string.IsNullOrWhiteSpace(c.ServerNickname) && c.ServerNickname != c.DisplayName;
+            var label = hasCustomNick ? c.ServerNickname! : c.DisplayName;
+            var subLabel = hasCustomNick ? $"{c.DisplayName} · @{c.Username}" : $"@{c.Username}";
+            return new SearchSelect.SelectOption(
+                c.DiscordUserId.ToString(),
+                label,
+                SubLabel: subLabel,
+                IconUrl: c.AvatarUrl,
+                RoundIcon: true);
+        }).ToList();
+
+    private Task HandleClassFilterChangedAsync(string? value)
+    {
+        _selectedClass = value ?? string.Empty;
+        return ApplyFiltersAsync();
+    }
+
+    private Task HandleStatusFilterChangedAsync(string? value)
+    {
+        if (Enum.TryParse<MemberLinkFilter>(value, out var parsed))
+        {
+            _statusFilter = parsed;
+        }
+        return ApplyFiltersAsync();
+    }
+
+    private Task HandleRoleFilterChangedAsync(string? value)
+    {
+        if (Enum.TryParse<MemberRoleFilter>(value, out var parsed))
+        {
+            _roleFilter = parsed;
+        }
+        return ApplyFiltersAsync();
+    }
+
+    private Task HandlePageSizeChangedAsync(string? value)
+    {
+        if (int.TryParse(value, out var size) && size is 25 or 50 or 100)
+        {
+            _pageSize = size;
+        }
+        return ApplyFiltersAsync();
+    }
+
+    private bool HasActiveFilters =>
+        !string.IsNullOrWhiteSpace(_searchText) ||
+        !string.IsNullOrWhiteSpace(_selectedClass) ||
+        _statusFilter != MemberLinkFilter.ActiveAll ||
+        _roleFilter != MemberRoleFilter.All;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.StateChanged += HandleSessionChanged;
+        if (!string.IsNullOrWhiteSpace(Session.QuickSearchQuery))
+        {
+            _searchText = Session.QuickSearchQuery;
+        }
+        await LoadMembersAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ExternalStatusFilter.HasValue && ExternalStatusFilter.Value != _statusFilter)
+        {
+            _statusFilter = ExternalStatusFilter.Value;
+            _page = 1;
+            await LoadMembersAsync();
+        }
+    }
+
+    private async void HandleSessionChanged()
+    {
+        await InvokeAsync(async () =>
+        {
+            if (_searchText != Session.QuickSearchQuery && !string.IsNullOrWhiteSpace(Session.QuickSearchQuery))
+            {
+                _searchText = Session.QuickSearchQuery;
+                _page = 1;
+            }
+            await LoadMembersAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task HandleSearchInputAsync(ChangeEventArgs e)
+    {
+        _searchText = e.Value?.ToString() ?? string.Empty;
+        _page = 1;
+
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts?.Dispose();
+        _searchDebounceCts = new CancellationTokenSource();
+        var ct = _searchDebounceCts.Token;
+
+        try
+        {
+            await Task.Delay(250, ct);
+            await LoadMembersAsync(ct);
+        }
+        catch (TaskCanceledException)
+        {
+            // Người dùng vẫn đang gõ -> bỏ qua đợt trước
+        }
+    }
+
+    private async Task ClearSearchAsync()
+    {
+        _searchText = string.Empty;
+        await ApplyFiltersAsync();
+    }
+
+    private async Task ResetFiltersAsync()
+    {
+        _searchText = string.Empty;
+        _selectedClass = string.Empty;
+        _statusFilter = MemberLinkFilter.ActiveAll;
+        _roleFilter = MemberRoleFilter.All;
+        _page = 1;
+        await LoadMembersAsync();
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        _page = 1;
+        await LoadMembersAsync();
+    }
+
+    private async Task LoadMembersAsync(CancellationToken ct = default)
+    {
+        if (Session.CurrentGuildId == 0)
+        {
+            _isLoading = false;
+            return;
+        }
+
+        _isLoading = true;
+        _classConfigs = await MemberService.GetResolvedClassConfigsAsync(Session.CurrentGuildId, ct);
+        _classConfigMap = _classConfigs.ToDictionary(c => c.GameClass);
+
+        GameClass? parsedClass = int.TryParse(_selectedClass, out var cInt) && cInt > 0
+            ? (GameClass)cInt
+            : null;
+
+        _result = await MemberService.QueryMembersAsync(new MemberQuery(
+            GuildId: Session.CurrentGuildId,
+            Search: _searchText,
+            GameClass: parsedClass,
+            StatusFilter: _statusFilter,
+            RoleFilter: _roleFilter,
+            SortBy: _sortBy,
+            SortDesc: _sortDesc,
+            Page: _page,
+            PageSize: _pageSize), ct);
+
+        _isLoading = false;
+    }
+
+    private async Task ToggleSortAsync(string column)
+    {
+        if (_sortBy == column)
+        {
+            _sortDesc = !_sortDesc;
+        }
+        else
+        {
+            _sortBy = column;
+            _sortDesc = false;
+        }
+
+        await LoadMembersAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _page = page;
+        await LoadMembersAsync();
+    }
+
+    private string SortArrow(string column) =>
+        _sortBy != column ? "↕" : (_sortDesc ? "↓" : "↑");
+
+    private string SortBadgeClass(string column) =>
+        _sortBy == column
+            ? "inline-flex items-center justify-center w-5 h-5 rounded-md bg-brand-100 text-brand-700 text-[10px]"
+            : "inline-flex items-center justify-center w-5 h-5 rounded-md bg-slate-100 text-slate-400 text-[10px]";
+
+    private ResolvedClassConfig GetClassDisplay(GameClass cls)
+    {
+        if (_classConfigMap.TryGetValue(cls, out var cfg))
+        {
+            return cfg;
+        }
+
+        if (ClassMetadata.TryGet(cls, out var meta))
+        {
+            return new ResolvedClassConfig(meta.Class, meta.Role, meta.DisplayName, meta.FileName, null, null, meta.HexColor, meta.SoftBgHex, meta.BorderHex);
+        }
+
+        return new ResolvedClassConfig(cls, ClassRole.Dps, $"Hệ phái #{(int)cls}", "dps.png", null, null, "#6366F1", "#6366F11F", "#6366F155", IsCustom: true);
+    }
+
+    private async Task HandleNicknameChangedAsync(GuildMember member, string? newNickname)
+    {
+        _actionMessage = null;
+        var trimmed = string.IsNullOrWhiteSpace(newNickname) ? null : newNickname.Trim();
+
+        if (member.DiscordUserId.HasValue)
+        {
+            var nickRes = await SyncService.UpdateMemberNicknameOnDiscordAsync(
+                Session.CurrentGuildId,
+                member.DiscordUserId.Value,
+                trimmed);
+
+            if (!nickRes.Success)
+            {
+                _actionMessage = nickRes.ErrorMessage;
+                _actionIsError = true;
+                await LoadMembersAsync();
+                return;
+            }
+        }
+
+        await MemberService.UpdateNicknameAsync(Session.CurrentGuildId, member.Id, trimmed);
+        _savedMemberId = member.Id;
+        _actionMessage = trimmed is not null
+            ? $"Đã đổi Nickname của {member.DisplayName} thành '{trimmed}' trên Discord & Web."
+            : $"Đã xóa Nickname của {member.DisplayName} trên Discord & Web.";
+        _actionIsError = false;
+
+        await LoadMembersAsync();
+        await NotifyChangedAsync();
+    }
+
+    private string GetPendingClassValue(long memberId) =>
+        _pendingClassSelections.TryGetValue(memberId, out var v) ? v : string.Empty;
+
+    private void SetPendingClassValue(long memberId, string? val) =>
+        _pendingClassSelections[memberId] = val ?? string.Empty;
+
+    private void StartEditClass(GuildMember member)
+    {
+        _editingClassMemberId = member.Id;
+        _pendingClassSelections[member.Id] = member.GameClass.HasValue ? ((int)member.GameClass.Value).ToString() : string.Empty;
+    }
+
+    private async Task HandleLinkClassAsync(GuildMember member)
+    {
+        _actionMessage = null;
+        var raw = GetPendingClassValue(member.Id);
+        if (!int.TryParse(raw, out var classInt) || classInt <= 0)
+        {
+            return;
+        }
+
+        var newClass = (GameClass)classInt;
+        var oldClass = member.GameClass;
+        var newCfg = GetClassDisplay(newClass);
+        string? roleNote = null;
+
+        if (member.DiscordUserId.HasValue)
+        {
+            // Gỡ Role hệ phái cũ trên Discord nếu đổi sang hệ phái khác
+            if (oldClass.HasValue && oldClass.Value != newClass)
+            {
+                var oldCfg = GetClassDisplay(oldClass.Value);
+                if (oldCfg.DiscordRoleId.HasValue && oldCfg.DiscordRoleId != newCfg.DiscordRoleId)
+                {
+                    await SyncService.RemoveGuildRoleFromMemberAsync(
+                        Session.CurrentGuildId,
+                        member.DiscordUserId.Value,
+                        oldCfg.DiscordRoleId.Value);
+                }
+            }
+
+            // Gán Role hệ phái mới trên Discord nếu đã cấu hình trong /settings
+            if (newCfg.DiscordRoleId.HasValue)
+            {
+                var addRes = await SyncService.AddGuildRoleToMemberAsync(
+                    Session.CurrentGuildId,
+                    member.DiscordUserId.Value,
+                    newCfg.DiscordRoleId.Value);
+
+                if (!addRes.Success)
+                {
+                    _actionMessage = $"Chưa thể gán Role @{newCfg.DiscordRoleName ?? newCfg.DisplayName} trên Discord: {addRes.ErrorMessage}";
+                    _actionIsError = true;
+                    return;
+                }
+
+                roleNote = $" và đã gán Role @{newCfg.DiscordRoleName ?? newCfg.DisplayName} trên Discord";
+            }
+        }
+
+        await MemberService.UpdateClassAsync(Session.CurrentGuildId, member.Id, newClass);
+        _editingClassMemberId = null;
+        _pendingClassSelections.Remove(member.Id);
+
+        _actionMessage = $"Đã liên kết {member.EffectiveName} vào phái {newCfg.DisplayName}{roleNote}.";
+        _actionIsError = false;
+
+        await LoadMembersAsync();
+        await NotifyChangedAsync();
+    }
+
+    private async Task HandleUnlinkClassAsync(GuildMember member)
+    {
+        _actionMessage = null;
+        var oldClass = member.GameClass;
+        string? roleNote = null;
+
+        if (member.DiscordUserId.HasValue && oldClass.HasValue)
+        {
+            var oldCfg = GetClassDisplay(oldClass.Value);
+            if (oldCfg.DiscordRoleId.HasValue)
+            {
+                var rmRes = await SyncService.RemoveGuildRoleFromMemberAsync(
+                    Session.CurrentGuildId,
+                    member.DiscordUserId.Value,
+                    oldCfg.DiscordRoleId.Value);
+
+                if (!rmRes.Success)
+                {
+                    _actionMessage = $"Chưa thể gỡ Role @{oldCfg.DiscordRoleName ?? oldCfg.DisplayName} trên Discord: {rmRes.ErrorMessage}";
+                    _actionIsError = true;
+                    return;
+                }
+
+                roleNote = $" và đã gỡ Role @{oldCfg.DiscordRoleName ?? oldCfg.DisplayName} trên Discord";
+            }
+        }
+
+        await MemberService.UpdateClassAsync(Session.CurrentGuildId, member.Id, null);
+        _editingClassMemberId = null;
+        _pendingClassSelections.Remove(member.Id);
+
+        _actionMessage = $"Đã hủy liên kết môn phái của {member.EffectiveName}{roleNote}.";
+        _actionIsError = false;
+
+        await LoadMembersAsync();
+        await NotifyChangedAsync();
+    }
+
+    private async Task PromptRemoveMemberAsync(GuildMember member)
+    {
+        _actionMessage = null;
+        _guildConfig = await MemberService.GetGuildConfigAsync(Session.CurrentGuildId);
+        _pendingRemoveMember = member;
+    }
+
+    private void CancelRemoveModal()
+    {
+        if (!_isProcessingRole)
+        {
+            _pendingRemoveMember = null;
+        }
+    }
+
+    private async Task ConfirmRemoveMemberAsync()
+    {
+        if (_pendingRemoveMember is null || _isProcessingRole) return;
+
+        _isProcessingRole = true;
+        _actionMessage = null;
+        var member = _pendingRemoveMember;
+
+        try
+        {
+            var roleRemovedMsg = string.Empty;
+            if (member.DiscordUserId.HasValue && _guildConfig?.MemberRoleId is > 0)
+            {
+                var roleRes = await SyncService.RemoveGuildRoleFromMemberAsync(
+                    Session.CurrentGuildId,
+                    member.DiscordUserId.Value,
+                    _guildConfig.MemberRoleId.Value);
+
+                if (!roleRes.Success)
+                {
+                    _actionMessage = roleRes.ErrorMessage;
+                    _actionIsError = true;
+                    _pendingRemoveMember = null;
+                    return;
+                }
+
+                roleRemovedMsg = roleRes.MemberNotInGuild
+                    ? " (thành viên đã rời server Discord)"
+                    : $" và đã gỡ Role @{_guildConfig.MemberRoleName ?? _guildConfig.MemberRoleId.ToString()} trên Discord";
+            }
+
+            await MemberService.SoftRemoveAsync(Session.CurrentGuildId, member.Id);
+            _pendingRemoveMember = null;
+            _actionMessage = $"Đã remove {member.EffectiveName}{roleRemovedMsg}.";
+            _actionIsError = false;
+
+            await LoadMembersAsync();
+            await NotifyChangedAsync();
+        }
+        finally
+        {
+            _isProcessingRole = false;
+        }
+    }
+
+    private async Task HandleRestoreAsync(GuildMember member)
+    {
+        if (_isProcessingRole) return;
+        _isProcessingRole = true;
+        _actionMessage = null;
+
+        try
+        {
+            var cfg = await MemberService.GetGuildConfigAsync(Session.CurrentGuildId);
+            var hasRole = !member.IsExternal;
+            string? note = null;
+
+            if (member.DiscordUserId.HasValue && cfg?.MemberRoleId is > 0)
+            {
+                var addRes = await SyncService.AddGuildRoleToMemberAsync(
+                    Session.CurrentGuildId,
+                    member.DiscordUserId.Value,
+                    cfg.MemberRoleId.Value);
+
+                hasRole = addRes.Success;
+                note = addRes.Success
+                    ? $" và đã gán lại Role @{cfg.MemberRoleName ?? cfg.MemberRoleId.ToString()} trên Discord"
+                    : $" (chưa gán lại được Role Discord: {addRes.ErrorMessage})";
+            }
+
+            await MemberService.RestoreAsync(Session.CurrentGuildId, member.Id, hasRole);
+            _actionMessage = $"Đã khôi phục {member.EffectiveName}{note}.";
+            _actionIsError = false;
+
+            await LoadMembersAsync();
+            await NotifyChangedAsync();
+        }
+        finally
+        {
+            _isProcessingRole = false;
+        }
+    }
+
+    private async Task HandleHardDeleteAsync(GuildMember member)
+    {
+        await MemberService.DeletePermanentlyAsync(Session.CurrentGuildId, member.Id);
+        _actionMessage = $"Đã xóa vĩnh viễn hồ sơ {member.EffectiveName}.";
+        _actionIsError = false;
+        await LoadMembersAsync();
+        await NotifyChangedAsync();
+    }
+
+    private async Task OpenAddModalAsync()
+    {
+        _selectedCandidateIdStr = string.Empty;
+        _newDisplayName = string.Empty;
+        _newClassValue = string.Empty;
+        _addError = null;
+        _candidatesWarning = null;
+        _unassignedCandidates = [];
+        _showAddModal = true;
+        _loadingCandidates = true;
+        StateHasChanged();
+
+        try
+        {
+            var (members, warning) = await SyncService.GetUnassignedGuildMembersAsync(Session.CurrentGuildId);
+            _unassignedCandidates = members;
+            _candidatesWarning = warning;
+        }
+        finally
+        {
+            _loadingCandidates = false;
+        }
+    }
+
+    private void HandleCandidateSelected(string? selectedVal)
+    {
+        _selectedCandidateIdStr = selectedVal ?? string.Empty;
+        if (ulong.TryParse(_selectedCandidateIdStr, out var uid))
+        {
+            var cand = _unassignedCandidates.FirstOrDefault(c => c.DiscordUserId == uid);
+            if (cand is not null)
+            {
+                _newDisplayName = cand.ServerNickname ?? string.Empty;
+            }
+        }
+        else
+        {
+            _newDisplayName = string.Empty;
+        }
+    }
+
+    private void CloseAddModal()
+    {
+        if (!_addingMember) _showAddModal = false;
+    }
+
+    private async Task SubmitAddMemberAsync()
+    {
+        if (_addingMember) return;
+        _addError = null;
+
+        GameClass? cls = int.TryParse(_newClassValue, out var cInt) && cInt > 0
+            ? (GameClass)cInt
+            : null;
+
+        if (!ulong.TryParse(_selectedCandidateIdStr, out var selectedUserId))
+        {
+            _addError = "Vui lòng chọn một thành viên Discord từ danh sách.";
+            return;
+        }
+
+        var candidate = _unassignedCandidates.FirstOrDefault(c => c.DiscordUserId == selectedUserId);
+        if (candidate is null)
+        {
+            _addError = "Không tìm thấy thành viên đã chọn.";
+            return;
+        }
+
+        var desiredNick = string.IsNullOrWhiteSpace(_newDisplayName) ? null : _newDisplayName.Trim();
+        if (desiredNick is not null && desiredNick.Length > 32)
+        {
+            _addError = "Nickname trên Discord không được vượt quá 32 ký tự.";
+            return;
+        }
+
+        _addingMember = true;
+        try
+        {
+            var cfg = await MemberService.GetGuildConfigAsync(Session.CurrentGuildId);
+            var notes = new List<string>();
+            var hasGuildRole = true;
+
+            // 1. Gán Role bang trên Discord nếu đã cấu hình Role bang
+            if (cfg?.MemberRoleId is > 0)
+            {
+                var addGuildRoleRes = await SyncService.AddGuildRoleToMemberAsync(
+                    Session.CurrentGuildId,
+                    candidate.DiscordUserId,
+                    cfg.MemberRoleId.Value);
+
+                if (!addGuildRoleRes.Success)
+                {
+                    _addError = $"Không thể gán Role bang @{cfg.MemberRoleName ?? cfg.MemberRoleId.ToString()} trên Discord: {addGuildRoleRes.ErrorMessage}";
+                    return;
+                }
+
+                notes.Add($"đã gán Role @{cfg.MemberRoleName ?? cfg.MemberRoleId.ToString()}");
+            }
+
+            // 2. Gán Role hệ phái trên Discord nếu đã chọn hệ phái và có cấu hình Role hệ phái
+            if (cls.HasValue)
+            {
+                var clsCfg = GetClassDisplay(cls.Value);
+                if (clsCfg.DiscordRoleId.HasValue)
+                {
+                    var addClassRoleRes = await SyncService.AddGuildRoleToMemberAsync(
+                        Session.CurrentGuildId,
+                        candidate.DiscordUserId,
+                        clsCfg.DiscordRoleId.Value);
+
+                    if (addClassRoleRes.Success)
+                    {
+                        notes.Add($"gán Role @{clsCfg.DiscordRoleName ?? clsCfg.DisplayName}");
+                    }
+                }
+            }
+
+            // 3. Đổi Nickname trên Discord nếu người dùng nhập Nickname khác với Nick hiện tại
+            if (desiredNick != candidate.ServerNickname && desiredNick is not null)
+            {
+                var nickRes = await SyncService.UpdateMemberNicknameOnDiscordAsync(
+                    Session.CurrentGuildId,
+                    candidate.DiscordUserId,
+                    desiredNick);
+
+                if (nickRes.Success)
+                {
+                    notes.Add($"đổi nick '{desiredNick}'");
+                }
+                else
+                {
+                    // Giữ nguyên nick cũ nếu không đổi được (VD: Chủ server)
+                    desiredNick = candidate.ServerNickname;
+                }
+            }
+
+            await MemberService.UpsertDiscordMemberAsync(
+                Session.CurrentGuildId,
+                candidate.DiscordUserId,
+                candidate.Username,
+                candidate.DisplayName,
+                desiredNick,
+                candidate.AvatarUrl,
+                cls,
+                hasGuildRole,
+                isExternal: false);
+
+            _showAddModal = false;
+            var suffix = notes.Count > 0 ? $" ({string.Join(", ", notes)} trên Discord)" : string.Empty;
+            _actionMessage = $"Đã thêm {desiredNick ?? candidate.DisplayName} vào bang{suffix}.";
+            _actionIsError = false;
+
+            await LoadMembersAsync();
+            await NotifyChangedAsync();
+        }
+        finally
+        {
+            _addingMember = false;
+        }
+    }
+
+    private async Task NotifyChangedAsync()
+    {
+        if (OnMembersChanged.HasDelegate)
+        {
+            await OnMembersChanged.InvokeAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        Session.StateChanged -= HandleSessionChanged;
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts?.Dispose();
+    }
+}
